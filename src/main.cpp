@@ -183,7 +183,7 @@
    // Create objects using dynamic memory allocation to prevent stack issues
    Serial.println("Creating controllers...");
    Debug::info("Main", "Creating machine controller");
-   machineController = new MachineController(&motorManager);
+   machineController = new MachineController(&motorManager, &configManager);
    if (machineController) {
      Debug::info("Main", "Machine controller created, initializing...");
      machineController->initialize();
@@ -203,7 +203,7 @@
    }
    
    Debug::info("Main", "Creating command processor");
-   commandProcessor = new CommandProcessor(machineController);
+   commandProcessor = new CommandProcessor(machineController, &configManager);
    if (!commandProcessor) {
      Debug::error("Main", "Failed to allocate memory for command processor");
      Serial.println("Failed to create command processor!");

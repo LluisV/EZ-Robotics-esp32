@@ -7,8 +7,8 @@
  #include "MotorManager.h"
  #include "Debug.h"
  
- CommandProcessor::CommandProcessor(MachineController* machineController)
-   : machineController(machineController)
+ CommandProcessor::CommandProcessor(MachineController* machineController, ConfigManager* configManager)
+   : machineController(machineController), configManager(configManager)
  {
    Debug::info("CommandProcessor", "Initialized");
  }
@@ -91,6 +91,7 @@
     helpText += "  ?POS - Current position\n";
     helpText += "  ?STATUS - Machine status\n";
     helpText += "  ?ENDSTOPS - Endstop status\n";
+    helpText += "  ?CONFIG - Machine configuration\n";
     helpText += "  ?HELP - This help text\n";
     helpText += "  $G90/$G91 - Set absolute/relative mode\n";
     
@@ -119,6 +120,51 @@
       Debug::printDiagnostics();
       return "Diagnostics printed to debug output";
     }
+  }
+  else if (cleanCmd.startsWith("CONFIG")) {
+    // Report current machine configuration
+    if (!machineController) {
+      Debug::error("CommandProcessor", "Machine controller not available for config report");
+      return "Error: Machine controller not available";
+    }
+  
+    ConfigManager* configManager = machineController->getConfigManager();
+    if (!configManager) {
+      Debug::error("CommandProcessor", "Config manager not available");
+      return "Error: Config manager not available";
+    }
+  
+    // Get machine configuration
+    const MachineConfig& machineConfig = configManager->getMachineConfig();
+    
+    String configStr = "Machine Configuration:\n";
+    configStr += "  Name: " + machineConfig.machineName + "\n";
+    configStr += "  Default Feedrate: " + String(machineConfig.defaultFeedrate) + " mm/min\n";
+    configStr += "  Max Feedrate: " + String(machineConfig.maxFeedrate) + " mm/min\n";
+    configStr += "  Junction Deviation: " + String(machineConfig.junctionDeviation, 4) + " mm\n";
+    configStr += "  Arc Tolerance: " + String(machineConfig.arcTolerance, 4) + " mm\n\n";
+    
+    configStr += "Motor Configurations:\n";
+    
+    // Get motor configurations
+    int numMotors = configManager->getNumMotors();
+    for (int i = 0; i < numMotors; i++) {
+      const MotorConfig* motorConfig = configManager->getMotorConfig(i);
+      if (motorConfig) {
+        configStr += "  Motor " + motorConfig->name + ":\n";
+        configStr += "    Type: " + String(motorConfig->type == LINEAR_AXIS ? "Linear" : "Angular") + "\n";
+        configStr += "    Steps/Rev: " + String(motorConfig->stepsPerRev) + "\n";
+        configStr += "    Max Speed: " + String(motorConfig->maxSpeed) + " steps/sec\n";
+        configStr += "    Acceleration: " + String(motorConfig->acceleration) + " steps/sec²\n";
+        configStr += "    Max Travel: " + String(motorConfig->maxTravel) + " mm\n";
+        configStr += "    Home Speed: " + String(motorConfig->homeSpeed) + " steps/sec\n";
+        configStr += "    Homing Direction: " + String(motorConfig->homingDirection > 0 ? "Positive" : "Negative") + "\n";
+        configStr += "    Backoff Distance: " + String(motorConfig->backoffDistance) + " mm\n\n";
+      }
+    }
+    
+    Debug::info("CommandProcessor", "Configuration report requested");
+    return configStr;
   }
   
   Debug::warning("CommandProcessor", "Unknown info command: " + command);

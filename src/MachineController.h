@@ -30,7 +30,7 @@
     * @brief Construct a new Machine Controller object
     * @param motorManager Motor manager
     */
-   MachineController(MotorManager* motorManager);
+   MachineController(MotorManager* motorManager, ConfigManager* configManager);
    
    /**
     * @brief Initialize the machine controller
@@ -131,7 +131,15 @@
    void setAbsoluteMode(bool absolute) {
      absoluteMode = absolute;
    }
- 
+
+   /**
+   * @brief Get pointer to the ConfigManager
+   * @return Pointer to the ConfigManager instance
+   */
+  ConfigManager* getConfigManager() {
+    return configManager;
+  }
+  
  private:
    MotorManager* motorManager;         ///< Motor manager
    Kinematics* kinematics;             ///< Kinematics calculator (for transform)
@@ -152,6 +160,8 @@
     * @return Machine positions
     */
    std::vector<float> workToMachinePositions(const std::vector<float>& workPos);
+
+   ConfigManager* configManager;
  };
  
  #endif // MACHINE_CONTROLLER_H

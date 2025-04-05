@@ -17,8 +17,9 @@
    /**
     * @brief Construct a new CommandProcessor
     * @param machineController MachineController reference
+    * @param configManager ConfigManager reference
     */
-   CommandProcessor(MachineController* machineController);
+   CommandProcessor(MachineController* machineController, ConfigManager* configManager);
    
    /**
     * @brief Process an information request command
@@ -43,6 +44,7 @@
  
  private:
    MachineController* machineController;  ///< MachineController reference
+   ConfigManager* configManager;
  };
  
  #endif // COMMAND_PROCESSOR_H

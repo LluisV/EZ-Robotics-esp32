@@ -5,8 +5,9 @@
 
  #include "MachineController.h"
 
- MachineController::MachineController(MotorManager* motorManager)
+ MachineController::MachineController(MotorManager* motorManager, ConfigManager* configManager)
    : motorManager(motorManager),
+     configManager(configManager),
      kinematics(nullptr),
      currentFeedrate(1000.0f),
      absoluteMode(true)
@@ -22,6 +23,10 @@
      Serial.println("Invalid motor manager");
      return false;
    }
+   if (!configManager) {
+    Serial.println("Invalid config manager");
+    return false;
+  }
    
    // TODO: Initialize kinematics module
    // kinematics = new CartesianKinematics();
