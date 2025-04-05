@@ -1,0 +1,157 @@
+/**
+ * @file MachineController.h
+ * @brief Machine controller for the CNC system
+ */
+
+ #ifndef MACHINE_CONTROLLER_H
+ #define MACHINE_CONTROLLER_H
+ 
+ #include <Arduino.h>
+ #include <vector>
+ #include "MotorManager.h"
+ #include "Kinematics.h"
+ 
+ /**
+  * @brief Movement types
+  */
+ enum MovementType {
+   RAPID_MOVE,     ///< Rapid movement (G0)
+   LINEAR_MOVE,    ///< Linear movement (G1)
+   ARC_CW_MOVE,    ///< Clockwise arc (G2)
+   ARC_CCW_MOVE    ///< Counter-clockwise arc (G3)
+ };
+ 
+ /**
+  * @brief Controller class for the CNC machine
+  */
+ class MachineController {
+ public:
+   /**
+    * @brief Construct a new Machine Controller object
+    * @param motorManager Motor manager
+    */
+   MachineController(MotorManager* motorManager);
+   
+   /**
+    * @brief Initialize the machine controller
+    * @return True if successful, false otherwise
+    */
+   bool initialize();
+   
+   /**
+    * @brief Home all axes
+    * @return True if successful, false otherwise
+    */
+   bool homeAll();
+   
+   /**
+    * @brief Home specific axis
+    * @param axisName Axis name
+    * @return True if successful, false otherwise
+    */
+   bool homeAxis(const String& axisName);
+   
+   /**
+    * @brief Move to a position in machine coordinates
+    * @param positions Array of positions for each axis
+    * @param feedrate Feedrate in mm/min
+    * @param movementType Movement type (RAPID, LINEAR, etc.)
+    * @return True if successful, false otherwise
+    */
+   bool moveTo(const std::vector<float>& positions, float feedrate, MovementType movementType);
+   
+   /**
+    * @brief Move to a position in machine coordinates
+    * @param x X position
+    * @param y Y position
+    * @param z Z position
+    * @param feedrate Feedrate in mm/min
+    * @param movementType Movement type (RAPID, LINEAR, etc.)
+    * @return True if successful, false otherwise
+    */
+   bool moveTo(float x, float y, float z, float feedrate, MovementType movementType);
+   
+   /**
+    * @brief Execute a G-code command
+    * @param command G-code command
+    * @return True if successful, false otherwise
+    */
+   bool executeGCode(const String& command);
+   
+   /**
+    * @brief Get the current position of all axes
+    * @return Vector of current positions in user units
+    */
+   std::vector<float> getCurrentPosition() const;
+   
+   /**
+    * @brief Get the current position of a specific axis
+    * @param axisName Axis name
+    * @return Current position in user units
+    */
+   float getCurrentAxisPosition(const String& axisName) const;
+   
+   /**
+    * @brief Check if the machine is currently moving
+    * @return True if any axis is moving, false otherwise
+    */
+   bool isMoving() const;
+   
+   /**
+    * @brief Emergency stop
+    */
+   void emergencyStop();
+   
+   /**
+    * @brief Set the work coordinate system offset
+    * @param offsets Array of offsets for each axis
+    */
+   void setWorkOffset(const std::vector<float>& offsets);
+   
+   /**
+    * @brief Get the MotorManager
+    * @return MotorManager pointer
+    */
+   MotorManager* getMotorManager() const {
+     return motorManager;
+   }
+   
+   /**
+    * @brief Check if the machine is in absolute mode
+    * @return True if in absolute mode, false if relative
+    */
+   bool isAbsoluteMode() const {
+     return absoluteMode;
+   }
+   
+   /**
+    * @brief Set absolute or relative mode
+    * @param absolute True for absolute mode, false for relative
+    */
+   void setAbsoluteMode(bool absolute) {
+     absoluteMode = absolute;
+   }
+ 
+ private:
+   MotorManager* motorManager;         ///< Motor manager
+   Kinematics* kinematics;             ///< Kinematics calculator (for transform)
+   std::vector<float> workOffset;      ///< Work coordinate system offset
+   float currentFeedrate;              ///< Current feedrate in mm/min
+   bool absoluteMode;                  ///< True if in absolute mode, false if in relative mode
+   
+   /**
+    * @brief Convert machine coordinates to motor positions
+    * @param machinePos Machine position
+    * @return Motor positions
+    */
+   std::vector<float> machineToMotorPositions(const std::vector<float>& machinePos);
+   
+   /**
+    * @brief Convert work coordinates to machine coordinates
+    * @param workPos Work position
+    * @return Machine positions
+    */
+   std::vector<float> workToMachinePositions(const std::vector<float>& workPos);
+ };
+ 
+ #endif // MACHINE_CONTROLLER_H
