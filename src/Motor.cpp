@@ -4,6 +4,7 @@
  */
 
  #include "Motor.h"
+ #include "Debug.h"
 
  Motor::Motor(const MotorConfig* config) 
    : config(config), 
@@ -17,30 +18,37 @@
  }
  
  bool Motor::initialize(FastAccelStepperEngine* engine) {
-   if (!config || !engine) {
-     Serial.println("Invalid motor configuration or engine");
-     return false;
-   }
-   
-   // Create and configure the stepper
-   stepper = engine->stepperConnectToPin(config->stepPin);
-   if (!stepper) {
-     Serial.println("Failed to connect stepper to pin " + String(config->stepPin));
-     return false;
-   }
-   
-   stepper->setDirectionPin(config->dirPin);
-   stepper->setAcceleration(config->acceleration);
-   stepper->setSpeedInHz(config->maxSpeed);
-   
-   // Configure endstop pin if defined
-   if (config->endstopPin >= 0) {
-     pinMode(config->endstopPin, INPUT_PULLUP);
-   }
-   
-   Serial.println("Motor " + config->name + " initialized successfully");
-   return true;
- }
+  if (!config || !engine) {
+    Debug::error("Motor", "Invalid motor configuration or engine for " + 
+                 (config ? config->name : "Unknown motor"));
+    return false;
+  }
+  
+  // Create and configure the stepper
+  stepper = engine->stepperConnectToPin(config->stepPin);
+  if (!stepper) {
+    Debug::error("Motor", "Failed to connect stepper to pin " + String(config->stepPin) + 
+                 " for motor " + config->name);
+    return false;
+  }
+  
+  stepper->setDirectionPin(config->dirPin);
+  stepper->setAcceleration(config->acceleration);
+  stepper->setSpeedInHz(config->maxSpeed);
+  
+  // Configure endstop pin if defined
+  if (config->endstopPin >= 0) {
+    pinMode(config->endstopPin, INPUT_PULLUP);
+    Debug::verbose("Motor", "Configured endstop pin " + String(config->endstopPin) + 
+                   " for motor " + config->name);
+  }
+  
+  Debug::info("Motor", "Initialized motor " + config->name + 
+              " (Step: " + String(config->stepPin) + 
+              ", Dir: " + String(config->dirPin) + 
+              ", MaxSpeed: " + String(config->maxSpeed) + ")");
+  return true;
+}
  
  void Motor::setPosition(long position) {
    if (stepper) {
@@ -97,23 +105,32 @@
  }
  
  bool Motor::moveTo(long position, int speed) {
-   if (!stepper || status == HOMING) {
-     return false;
-   }
-   
-   // Set speed if specified
-   if (speed > 0) {
-     stepper->setSpeedInHz(speed);
-   } else {
-     stepper->setSpeedInHz(config->maxSpeed);
-   }
-   
-   // Start the move
-   stepper->moveTo(position);
-   status = MOVING;
-   
-   return true;
- }
+  if (!stepper || status == HOMING) {
+    Debug::warning("Motor", "Cannot move motor " + 
+                   (config ? config->name : "Unknown") + 
+                   ": No stepper or in homing state");
+    return false;
+  }
+  
+  // Set speed if specified
+  if (speed > 0) {
+    stepper->setSpeedInHz(speed);
+    Debug::verbose("Motor", "Setting custom speed " + String(speed) + 
+                   " for motor " + config->name);
+  } else {
+    stepper->setSpeedInHz(config->maxSpeed);
+  }
+  
+  // Start the move
+  stepper->moveTo(position);
+  status = MOVING;
+  
+  Debug::verbose("Motor", "Moving " + config->name + 
+                 " to position " + String(position) + 
+                 " at speed " + String(stepper->getMaxSpeedInMilliHz()));
+  
+  return true;
+}
  
  bool Motor::moveToUnits(float position, float speed) {
    long steps = unitsToSteps(position);
@@ -175,104 +192,112 @@
  }
  
  bool Motor::startHoming() {
-   if (!stepper || config->endstopPin < 0) {
-     Serial.println("Cannot home " + config->name + ": No endstop configured");
-     return false;
-   }
-   
-   // Save current position
-   homingStartPosition = getPosition();
-   
-   // Set initial status
-   endstopTriggered = false;
-   status = HOMING;
-   
-   // Check if endstop is already triggered
-   if (isEndstopTriggered()) {
-     Serial.println(config->name + " endstop already triggered at start, backing off first");
-     // Start with phase 2 (backing off)
-     homingPhase = 2;
-     stepper->setSpeedInHz(config->maxSpeed);
-     stepper->move(-config->homingDirection * unitsToSteps(config->backoffDistance));
-   } else {
-     // Normal case: Start with phase 1 (moving to endstop)
-     homingPhase = 1;
-     // Set homing speed
-     stepper->setSpeedInHz(config->homeSpeed);
-     // Start moving toward the endstop
-     stepper->move(config->homingDirection * 1000000); // Large value to ensure we hit the endstop
-     Serial.println("Started homing for " + config->name);
-   }
-   
-   lastEndstopCheckTime = millis();
-   return true;
- }
+  if (!stepper || config->endstopPin < 0) {
+    Debug::error("Motor", "Cannot home " + config->name + ": No endstop configured");
+    return false;
+  }
+  
+  // Save current position
+  homingStartPosition = getPosition();
+  
+  // Set initial status
+  endstopTriggered = false;
+  status = HOMING;
+  
+  Debug::info("Motor", "Starting homing sequence for " + config->name);
+  Debug::verbose("Motor", "Homing details - Start Position: " + String(homingStartPosition) + 
+                 ", Endstop Pin: " + String(config->endstopPin) + 
+                 ", Homing Direction: " + String(config->homingDirection));
+  
+  // Check if endstop is already triggered
+  if (isEndstopTriggered()) {
+    Debug::warning("Motor", config->name + " endstop already triggered at start, backing off first");
+    // Start with phase 2 (backing off)
+    homingPhase = 2;
+    stepper->setSpeedInHz(config->maxSpeed);
+    stepper->move(-config->homingDirection * unitsToSteps(config->backoffDistance));
+  } else {
+    // Normal case: Start with phase 1 (moving to endstop)
+    homingPhase = 1;
+    // Set homing speed
+    stepper->setSpeedInHz(config->homeSpeed);
+    // Start moving toward the endstop
+    stepper->move(config->homingDirection * 1000000); // Large value to ensure we hit the endstop
+    Debug::verbose("Motor", "Moving toward endstop at home speed");
+  }
+  
+  lastEndstopCheckTime = millis();
+  return true;
+}
  
- bool Motor::update() {
-   if (!stepper) {
-     return false;
-   }
-   
-   // Update status if movement finished
-   if (status == MOVING && !stepper->isRunning()) {
-     status = IDLE;
-   }
-   
-   // Handle homing state
-   if (status == HOMING) {
-     const unsigned long currentTime = millis();
-     
-     // Check endstop every 10ms
-     if (currentTime - lastEndstopCheckTime >= 10) {
-       lastEndstopCheckTime = currentTime;
-       
-       switch (homingPhase) {
-         case 1: // Phase 1: Moving to endstop
-           if (isEndstopTriggered()) {
-             // Endstop hit, stop immediately
-             stepper->forceStop();
-             delay(100); // Short delay for physical stop
-             
-             // Phase 2: Back off from endstop
-             homingPhase = 2;
-             stepper->setSpeedInHz(config->maxSpeed);
-             stepper->move(-config->homingDirection * unitsToSteps(config->backoffDistance));
-             
-             Serial.println(config->name + " endstop triggered, backing off");
-           }
-           break;
-           
-         case 2: // Phase 2: Backing off from endstop
-           if (!stepper->isRunning()) {
-             // Backoff complete, approach endstop slowly
-             homingPhase = 3;
-             stepper->setSpeedInHz(config->homeSpeed / 4); // Slower approach
-             stepper->move(config->homingDirection * 1000000); // Large value to ensure we hit the endstop
-             
-             Serial.println(config->name + " approaching endstop slowly");
-           }
-           break;
-           
-         case 3: // Phase 3: Slow approach to endstop
-           if (isEndstopTriggered()) {
-             // Endstop hit again, stop immediately
-             stepper->forceStop();
-             delay(100); // Short delay for physical stop
-             
-             // Set current position as zero or reference position
-             stepper->setCurrentPosition(0);
-             status = IDLE;
-             homingPhase = 0;
-             
-             Serial.println(config->name + " homing complete");
-           }
-           break;
-       }
-     }
-   }
-   
-   return true;
- }
+bool Motor::update() {
+  if (!stepper) {
+    return false;
+  }
+  
+  // Update status if movement finished
+  if (status == MOVING && !stepper->isRunning()) {
+    status = IDLE;
+    Debug::verbose("Motor", config->name + " movement completed. Status: IDLE");
+  }
+  
+  // Handle homing state
+  if (status == HOMING) {
+    const unsigned long currentTime = millis();
+    
+    // Check endstop every 10ms
+    if (currentTime - lastEndstopCheckTime >= 10) {
+      lastEndstopCheckTime = currentTime;
+      
+      switch (homingPhase) {
+        case 1: // Phase 1: Moving to endstop
+          if (isEndstopTriggered()) {
+            Debug::info("Motor", config->name + " endstop triggered in phase 1");
+            // Endstop hit, stop immediately
+            stepper->forceStop();
+            delay(100); // Short delay for physical stop
+            
+            // Phase 2: Back off from endstop
+            homingPhase = 2;
+            stepper->setSpeedInHz(config->maxSpeed);
+            stepper->move(-config->homingDirection * unitsToSteps(config->backoffDistance));
+            
+            Debug::verbose("Motor", "Backing off from " + config->name + " endstop");
+          }
+          break;
+          
+        case 2: // Phase 2: Backing off from endstop
+          if (!stepper->isRunning()) {
+            // Backoff complete, approach endstop slowly
+            homingPhase = 3;
+            stepper->setSpeedInHz(config->homeSpeed / 4); // Slower approach
+            stepper->move(config->homingDirection * 1000000); // Large value to ensure we hit the endstop
+            
+            Debug::verbose("Motor", "Slowly approaching " + config->name + " endstop");
+          }
+          break;
+          
+        case 3: // Phase 3: Slow approach to endstop
+          if (isEndstopTriggered()) {
+            Debug::info("Motor", config->name + " endstop triggered in phase 3");
+            // Endstop hit again, stop immediately
+            stepper->forceStop();
+            delay(100); // Short delay for physical stop
+            
+            // Set current position as zero or reference position
+            stepper->setCurrentPosition(0);
+            status = IDLE;
+            homingPhase = 0;
+            
+            Debug::info("Motor", config->name + " homing complete");
+          }
+          break;
+      }
+    }
+  }
+  
+  return true;
+}
  
  const MotorConfig* Motor::getConfig() const {
    return config;
@@ -283,10 +308,17 @@
  }
  
  bool Motor::isEndstopTriggered() const {
-   if (config->endstopPin < 0) {
-     return false;
-   }
-   
-   bool state = digitalRead(config->endstopPin) == HIGH;
-   return config->endstopInverted ? !state : state;
- }
+  if (config->endstopPin < 0) {
+    return false;
+  }
+  
+  bool state = digitalRead(config->endstopPin) == HIGH;
+  bool triggered = config->endstopInverted ? !state : state;
+  
+  Debug::verbose("Motor", config->name + " endstop check: " + 
+                 String(triggered ? "TRIGGERED" : "OPEN") + 
+                 " (raw state: " + String(state) + 
+                 ", inverted: " + String(config->endstopInverted) + ")");
+  
+  return triggered;
+}

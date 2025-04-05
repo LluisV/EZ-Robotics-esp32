@@ -5,65 +5,98 @@
 
  #include "GCodeParser.h"
  #include <map>
+ #include "Debug.h"
  
  GCodeParser::GCodeParser(MachineController* machineController)
-   : machineController(machineController),
-     lastFeedrate(1000.0f),
-     absoluteMode(true),
-     imperialUnits(false)
- {
- }
+ : machineController(machineController),
+   lastFeedrate(1000.0f),
+   absoluteMode(true),
+   imperialUnits(false)
+{
+ Debug::info("GCodeParser", "Initialized with machine controller");
+}
  
- bool GCodeParser::parse(const String& command) {
-   // Ignore empty lines and comments
-   String trimmedCmd = command;
-   trimmedCmd.trim();
-   
-   if (trimmedCmd.length() == 0 || trimmedCmd.startsWith(";")) {
-     return true;
-   }
-   
-   // Remove inline comments
-   int commentIdx = trimmedCmd.indexOf(';');
-   if (commentIdx >= 0) {
-     trimmedCmd = trimmedCmd.substring(0, commentIdx);
-     trimmedCmd.trim();
-   }
-   
-   // Extract G/M code
-   char codeType;
-   int code = extractCode(trimmedCmd, codeType);
-   
-   if (code < 0) {
-     Serial.println("Invalid G-code format: " + command);
-     return false;
-   }
-   
-   // Parse parameters
-   std::map<char, float> params = parseParameters(trimmedCmd);
-   
-   // Maintain last parameters for modal commands
-   for (const auto& param : params) {
-     lastParams[param.first] = param.second;
-   }
-   
-   // Execute the command
-   bool result = false;
-   if (codeType == 'G') {
-     result = executeGCode(code, params);
-   } else if (codeType == 'M') {
-     result = executeMCode(code, params);
-   } else {
-     Serial.println("Unsupported code type: " + String(codeType));
-     return false;
-   }
-   
-   if (!result) {
-     Serial.println("Failed to execute command: " + command);
-   }
-   
-   return result;
- }
+bool GCodeParser::parse(const String& command) {
+  Debug::verbose("GCodeParser", "Parsing command: " + command);
+  
+  // Ignore empty lines and comments
+  String trimmedCmd = command;
+  trimmedCmd.trim();
+  
+  if (trimmedCmd.length() == 0 || trimmedCmd.startsWith(";")) {
+    Debug::verbose("GCodeParser", "Ignoring empty line or comment");
+    return true;
+  }
+  
+  // Remove inline comments
+  int commentIdx = trimmedCmd.indexOf(';');
+  if (commentIdx >= 0) {
+    trimmedCmd = trimmedCmd.substring(0, commentIdx);
+    trimmedCmd.trim();
+    Debug::verbose("GCodeParser", "Removed inline comment. Trimmed command: " + trimmedCmd);
+  }
+
+  // Special handling for info commands
+  if (trimmedCmd.startsWith("?") || 
+      trimmedCmd == "HELP" || 
+      trimmedCmd == "STATUS" || 
+      trimmedCmd == "POS" || 
+      trimmedCmd == "ENDSTOPS" ||
+      trimmedCmd.startsWith("DEBUG")) {
+    Debug::info("GCodeParser", "Recognized info command: " + trimmedCmd);
+    return true;
+  }
+
+  // Extract G/M code
+  char codeType;
+  int code = extractCode(trimmedCmd, codeType);
+  
+  if (code < 0) {
+    Debug::error("GCodeParser", "Invalid G-code format: " + command);
+    Serial.println("Invalid G-code format: " + command);
+    return false;
+  }
+  
+  Debug::verbose("GCodeParser", "Extracted code: " + String(codeType) + String(code));
+  
+  // Parse parameters
+  std::map<char, float> params = parseParameters(trimmedCmd);
+  
+  // Log parsed parameters
+  Debug::verbose("GCodeParser", "Parsed parameters count: " + String(params.size()));
+  for (const auto& param : params) {
+    Debug::verbose("GCodeParser", "Parameter " + String(param.first) + ": " + String(param.second));
+    lastParams[param.first] = param.second;
+  }
+  
+  // Execute the command
+  bool result = false;
+  try {
+    if (codeType == 'G') {
+      Debug::verbose("GCodeParser", "Executing G-code: G" + String(code));
+      result = executeGCode(code, params);
+    } else if (codeType == 'M') {
+      Debug::verbose("GCodeParser", "Executing M-code: M" + String(code));
+      result = executeMCode(code, params);
+    } else {
+      Debug::error("GCodeParser", "Unsupported code type: " + String(codeType));
+      Serial.println("Unsupported code type: " + String(codeType));
+      return false;
+    }
+  } catch (const std::exception& e) {
+    Debug::error("GCodeParser", "Exception during command execution: " + String(e.what()));
+    result = false;
+  }
+  
+  if (!result) {
+    Debug::warning("GCodeParser", "Failed to execute command: " + command);
+    Serial.println("Failed to execute command: " + command);
+  } else {
+    Debug::verbose("GCodeParser", "Command executed successfully");
+  }
+  
+  return result;
+}
  
  std::vector<String> GCodeParser::getSupportedCodes() const {
    std::vector<String> codes;
@@ -88,73 +121,81 @@
  }
  
  std::map<char, float> GCodeParser::parseParameters(const String& command) {
-   std::map<char, float> params;
-   
-   for (int i = 0; i < command.length(); i++) {
-     char c = command.charAt(i);
-     
-     // Skip non-parameter letters or already processed code letter
-     if (!isalpha(c) || c == 'G' || c == 'g' || c == 'M' || c == 'm') {
-       continue;
-     }
-     
-     // Find the parameter value
-     int valueStart = i + 1;
-     int valueEnd = valueStart;
-     
-     // Find the end of the number
-     while (valueEnd < command.length() && 
-            (isdigit(command.charAt(valueEnd)) || 
-             command.charAt(valueEnd) == '.' || 
-             command.charAt(valueEnd) == '-')) {
-       valueEnd++;
-     }
-     
-     // Extract and convert the value
-     if (valueEnd > valueStart) {
-       String valueStr = command.substring(valueStart, valueEnd);
-       float value = valueStr.toFloat();
-       
-       // Store the parameter (uppercase for consistency)
-       params[toupper(c)] = value;
-       
-       // Skip to the end of this parameter
-       i = valueEnd - 1;
-     }
-   }
-   
-   return params;
- }
+  std::map<char, float> params;
+  
+  Debug::verbose("GCodeParser", "Parsing parameters from: " + command);
+  
+  for (int i = 0; i < command.length(); i++) {
+    char c = command.charAt(i);
+    
+    // Skip non-parameter letters or already processed code letter
+    if (!isalpha(c) || c == 'G' || c == 'g' || c == 'M' || c == 'm') {
+      continue;
+    }
+    
+    // Find the parameter value
+    int valueStart = i + 1;
+    int valueEnd = valueStart;
+    
+    // Find the end of the number
+    while (valueEnd < command.length() && 
+           (isdigit(command.charAt(valueEnd)) || 
+            command.charAt(valueEnd) == '.' || 
+            command.charAt(valueEnd) == '-')) {
+      valueEnd++;
+    }
+    
+    // Extract and convert the value
+    if (valueEnd > valueStart) {
+      String valueStr = command.substring(valueStart, valueEnd);
+      float value = valueStr.toFloat();
+      
+      // Store the parameter (uppercase for consistency)
+      params[toupper(c)] = value;
+      
+      Debug::verbose("GCodeParser", "Parsed parameter: " + String(toupper(c)) + " = " + String(value));
+      
+      // Skip to the end of this parameter
+      i = valueEnd - 1;
+    }
+  }
+  
+  return params;
+}
  
- int GCodeParser::extractCode(const String& command, char& codeType) {
-   // Find G or M code
-   for (int i = 0; i < command.length(); i++) {
-     char c = toupper(command.charAt(i));
-     
-     if (c == 'G' || c == 'M') {
-       codeType = c;
-       
-       // Find the code number
-       int valueStart = i + 1;
-       int valueEnd = valueStart;
-       
-       // Find the end of the number
-       while (valueEnd < command.length() && 
-              (isdigit(command.charAt(valueEnd)) || 
-               command.charAt(valueEnd) == '.')) {
-         valueEnd++;
-       }
-       
-       // Extract and convert the value
-       if (valueEnd > valueStart) {
-         String valueStr = command.substring(valueStart, valueEnd);
-         return valueStr.toInt();
-       }
-     }
-   }
-   
-   return -1; // No valid code found
- }
+int GCodeParser::extractCode(const String& command, char& codeType) {
+  // Find G or M code
+  for (int i = 0; i < command.length(); i++) {
+    char c = toupper(command.charAt(i));
+    
+    if (c == 'G' || c == 'M') {
+      codeType = c;
+      
+      // Find the code number
+      int valueStart = i + 1;
+      int valueEnd = valueStart;
+      
+      // Find the end of the number
+      while (valueEnd < command.length() && 
+             (isdigit(command.charAt(valueEnd)) || 
+              command.charAt(valueEnd) == '.')) {
+        valueEnd++;
+      }
+      
+      // Extract and convert the value
+      if (valueEnd > valueStart) {
+        String valueStr = command.substring(valueStart, valueEnd);
+        int extractedCode = valueStr.toInt();
+        
+        Debug::verbose("GCodeParser", "Extracted " + String(codeType) + "-code: " + String(extractedCode));
+        return extractedCode;
+      }
+    }
+  }
+  
+  Debug::warning("GCodeParser", "No valid code found in command");
+  return -1; // No valid code found
+}
  
  bool GCodeParser::executeGCode(int code, const std::map<char, float>& params) {
    switch (code) {
