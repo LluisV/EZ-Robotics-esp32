@@ -200,13 +200,23 @@ Motor* MotorManager::getMotorByName(const String& name) {
 bool MotorManager::moveToSynchronizedUnits(const std::vector<float>& positions) {
   Debug::verbose("MotorManager", "Attempting synchronized move in units");
   
-  std::vector<long> stepsPositions(positions.size());
+  std::vector<long> stepsPositions(motors.size());
   
-  for (size_t i = 0; i < positions.size() && i < motors.size(); i++) {
-    stepsPositions[i] = motors[i]->unitsToSteps(positions[i]);
+  for (size_t i = 0; i < motors.size(); i++) {
+    float targetPosition;
+    
+    // If a position is specified for this axis and it's not NaN, use it
+    if (i < positions.size() && !isnan(positions[i])) {
+      targetPosition = positions[i];
+    } else {
+      // Otherwise, use the current position of the motor
+      targetPosition = motors[i]->getPositionInUnits();
+    }
+    
+    stepsPositions[i] = motors[i]->unitsToSteps(targetPosition);
     
     Debug::verbose("MotorManager", motors[i]->getName() + 
-                   " units: " + String(positions[i]) + 
+                   " units: " + String(targetPosition) + 
                    " -> steps: " + String(stepsPositions[i]));
   }
   

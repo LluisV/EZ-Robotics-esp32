@@ -162,7 +162,7 @@
    xConfig.acceleration = 1000;
    xConfig.homingDirection = -1;
    xConfig.backoffDistance = 5.0;
-   xConfig.maxTravel = 200.0;
+   xConfig.maxTravel = 240.0;
    motors.push_back(xConfig);
    
    // Setup default Y axis
@@ -181,7 +181,7 @@
    yConfig.acceleration = 1000;
    yConfig.homingDirection = -1;
    yConfig.backoffDistance = 5.0;
-   yConfig.maxTravel = 200.0;
+   yConfig.maxTravel = 350.0;
    motors.push_back(yConfig);
    
    // Setup default Z axis
@@ -200,7 +200,7 @@
    zConfig.acceleration = 1000;
    zConfig.homingDirection = -1;
    zConfig.backoffDistance = 5.0;
-   zConfig.maxTravel = 100.0;
+   zConfig.maxTravel = 125.0;
    motors.push_back(zConfig);
    
    Serial.println("Using default configuration with 3 axes");

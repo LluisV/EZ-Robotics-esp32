@@ -36,17 +36,6 @@ bool GCodeParser::parse(const String& command) {
     Debug::verbose("GCodeParser", "Removed inline comment. Trimmed command: " + trimmedCmd);
   }
 
-  // Special handling for info commands
-  if (trimmedCmd.startsWith("?") || 
-      trimmedCmd == "HELP" || 
-      trimmedCmd == "STATUS" || 
-      trimmedCmd == "POS" || 
-      trimmedCmd == "ENDSTOPS" ||
-      trimmedCmd.startsWith("DEBUG")) {
-    Debug::info("GCodeParser", "Recognized info command: " + trimmedCmd);
-    return true;
-  }
-
   // Extract G/M code
   char codeType;
   int code = extractCode(trimmedCmd, codeType);

@@ -22,7 +22,7 @@
         "acceleration": 1000,
         "homingDirection": -1,
         "backoffDistance": 5.0,
-        "maxTravel": 200.0
+        "maxTravel": 240.0
       },
       {
         "name": "Y",
@@ -39,7 +39,7 @@
         "acceleration": 1000,
         "homingDirection": -1,
         "backoffDistance": 5.0,
-        "maxTravel": 200.0
+        "maxTravel": 350.0
       },
       {
         "name": "Z",
@@ -56,7 +56,7 @@
         "acceleration": 1000,
         "homingDirection": -1,
         "backoffDistance": 5.0,
-        "maxTravel": 100.0
+        "maxTravel": 125.0
       }
     ]
   }

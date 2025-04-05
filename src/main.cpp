@@ -14,7 +14,7 @@
  
  // Debug configuration
  #define DEBUG_ENABLED true
- #define DEBUG_LEVEL DEBUG_INFO
+ #define DEBUG_LEVEL DEBUG_VERBOSE
  
  // Task handles for dual-core operation
  TaskHandle_t commTaskHandle = NULL;
@@ -33,48 +33,51 @@
   * Handles serial communication and G-code parsing with command priority
   */
  void communicationTask(void *parameter) {
-   Debug::info("CommunicationTask", "Task started on Core " + String(xPortGetCoreID()));
-   
-   while (true) {
-     // Check for incoming G-code commands
-     if (Serial.available()) {
-       String command = Serial.readStringUntil('\n');
-       command.trim();
-       
-       if (command.length() > 0) {
-         Debug::verbose("CommunicationTask", "Received command: " + command);
-         
-         // Check for special command prefixes
-         if (command.startsWith("!")) {
-           // Emergency command - highest priority
-           commandQueue.push(command.substring(1), IMMEDIATE);
-           Debug::info("CommunicationTask", "Emergency command queued: " + command);
-           Serial.println("Emergency command queued: " + command);
-         } 
-         else if (command.startsWith("?")) {
-           // Information request - high priority
-           commandQueue.push(command.substring(1), INFO);
-           Debug::verbose("CommunicationTask", "Info command queued: " + command.substring(1));
-         }
-         else if (command.startsWith("$")) {
-           // Setting command - medium priority
-           commandQueue.push(command.substring(1), SETTING);
-           Debug::verbose("CommunicationTask", "Setting command queued: " + command.substring(1));
-         } 
-         else {
-           // Regular G-code - lowest priority
-           commandQueue.push(command, MOTION);
-           Debug::verbose("CommunicationTask", "Motion command queued: " + command);
-         }
-         
-         Debug::verbose("CommunicationTask", "Queue status: " + String(commandQueue.size()) + " commands in queue");
-       }
-     }
-     
-     // Let the CPU breathe
-     vTaskDelay(1);
-   }
- }
+  Debug::info("CommunicationTask", "Task started on Core " + String(xPortGetCoreID()));
+  
+  while (true) {
+    // Check for incoming G-code commands
+    if (Serial.available()) {
+      String command = Serial.readStringUntil('\n');
+      command.trim();
+      
+      if (command.length() > 0) {
+        Debug::verbose("CommunicationTask", "Received command: " + command);
+        
+        // Check for special command prefixes
+        if (command.startsWith("!")) {
+          // Emergency command - highest priority
+          commandQueue.push(command.substring(1), IMMEDIATE);
+          Debug::info("CommunicationTask", "Emergency command queued: " + command);
+          Serial.println("Emergency command queued: " + command);
+        } 
+        else if (command.startsWith("?")) {
+          // Information request - handle directly without queuing
+          String response = commandProcessor->processInfoCommand(command.substring(1));
+          if (!response.isEmpty()) {
+            Debug::info("CommunicationTask", "Sending info response directly: " + response);
+            Serial.println(response);
+          }
+        }
+        else if (command.startsWith("$")) {
+          // Setting command - medium priority
+          commandQueue.push(command.substring(1), SETTING);
+          Debug::verbose("CommunicationTask", "Setting command queued: " + command.substring(1));
+        } 
+        else {
+          // Regular G-code - lowest priority
+          commandQueue.push(command, MOTION);
+          Debug::verbose("CommunicationTask", "Motion command queued: " + command);
+        }
+        
+        Debug::verbose("CommunicationTask", "Queue status: " + String(commandQueue.size()) + " commands in queue");
+      }
+    }
+    
+    // Let the CPU breathe
+    vTaskDelay(1);
+  }
+}
  
  /**
   * @brief Motion control task that runs on Core 1
@@ -84,70 +87,44 @@
    Debug::info("MotionTask", "Task started on Core " + String(xPortGetCoreID()));
    
    while (true) {
-     // Add a null pointer check for safety
-     if (machineController != NULL && gCodeParser != NULL && commandProcessor != NULL) {
-       // First check for immediate commands
-       String immediateCmd = commandQueue.getNextImmediate();
-       
-       if (immediateCmd.length() > 0) {
-         Debug::info("MotionTask", "Processing immediate command: " + immediateCmd);
-         // Process the immediate command
-         if (immediateCmd == "STOP" || immediateCmd == "M112") {
-           // Emergency stop
-           machineController->emergencyStop();
-           Debug::error("MotionTask", "EMERGENCY STOP EXECUTED");
-           Serial.println("EMERGENCY STOP EXECUTED");
-         } else {
-           // Other immediate commands
-           Debug::verbose("MotionTask", "Parsing immediate G-code: " + immediateCmd);
-           gCodeParser->parse(immediateCmd);
-         }
-       }
-       // Then process regular commands if not busy with immediate commands
-       else if (!commandQueue.isEmpty()) {
-         String command = commandQueue.pop();
-         Debug::verbose("MotionTask", "Processing command from queue: " + command);
-         
-         // Handle information requests specially
-         if (command.startsWith("POS")) {
-           // Report current position
-           Debug::verbose("MotionTask", "Position request received");
-           std::vector<float> positions = machineController->getCurrentPosition();
-           String posStr = "Position:";
-           for (size_t i = 0; i < positions.size(); i++) {
-             Motor* motor = motorManager.getMotor(i);
-             if (motor) {
-               posStr += " " + motor->getName() + ":" + String(positions[i], 3);
-             }
-           }
-           Debug::info("MotionTask", "Sending position data: " + posStr);
-           Serial.println(posStr);
-         }
-         else if (command.startsWith("STATUS")) {
-           // Report machine status
-           Debug::verbose("MotionTask", "Status request received");
-           String status = "Status: ";
-           status += machineController->isMoving() ? "MOVING" : "IDLE";
-           Debug::info("MotionTask", "Sending status: " + status);
-           Serial.println(status);
-         }
-         else {
-           // Parse and execute regular G-code command
-           Debug::verbose("MotionTask", "Parsing G-code: " + command);
-           gCodeParser->parse(command);
-         }
-       }
-       
-       // Check and update motor states
-       motorManager.update();
-     } else {
-       Debug::error("MotionTask", "Critical components not initialized!");
-       Serial.println("Warning: Core components not initialized!");
-     }
-     
-     // Let the CPU breathe
-     vTaskDelay(1);
-   }
+    // Add a null pointer check for safety
+    if (machineController != NULL && gCodeParser != NULL && commandProcessor != NULL) {
+      // First check for immediate commands
+      String immediateCmd = commandQueue.getNextImmediate();
+      
+      if (immediateCmd.length() > 0) {
+        Debug::info("MotionTask", "Processing immediate command: " + immediateCmd);
+        // Process the immediate command
+        if (immediateCmd == "STOP" || immediateCmd == "M112") {
+          // Emergency stop
+          machineController->emergencyStop();
+          Debug::error("MotionTask", "EMERGENCY STOP EXECUTED");
+          Serial.println("EMERGENCY STOP EXECUTED");
+        } else {
+          // Other immediate commands
+          Debug::verbose("MotionTask", "Parsing immediate G-code: " + immediateCmd);
+          gCodeParser->parse(immediateCmd);
+        }
+      }
+      // Then process regular commands if not busy with immediate commands
+      else if (!commandQueue.isEmpty()) {
+        String command = commandQueue.pop();
+        Debug::verbose("MotionTask", "Processing command from queue: " + command);
+        
+        // Directly parse as G-code
+        gCodeParser->parse(command);
+      }
+      
+      // Check and update motor states
+      motorManager.update();
+    } else {
+      Debug::error("MotionTask", "Critical components not initialized!");
+      Serial.println("Warning: Core components not initialized!");
+    }
+    
+    // Let the CPU breathe
+    vTaskDelay(1);
+  }
  }
  
  void setup() {

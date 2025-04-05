@@ -118,7 +118,6 @@
  }
  
  String CommandQueue::getNextImmediate() {
-   Debug::verbose("CommandQueue", "Attempting to get next immediate command");
    
    if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
      Debug::warning("CommandQueue", "Failed to acquire mutex for get next immediate");
@@ -136,9 +135,7 @@
    return result;
  }
  
- bool CommandQueue::isEmpty() const {
-   Debug::verbose("CommandQueue", "Checking if queue is empty");
-   
+ bool CommandQueue::isEmpty() const {   
    if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
      Debug::warning("CommandQueue", "Failed to acquire mutex for isEmpty");
      return true;
@@ -147,7 +144,6 @@
    bool empty = (motionCount == 0 && settingCount == 0 && 
                  infoCount == 0 && immedCount == 0);
    
-   Debug::verbose("CommandQueue", "Queue is " + String(empty ? "empty" : "not empty"));
    
    xSemaphoreGive(mutex);
    return empty;
