@@ -85,25 +85,27 @@
  }
  
  void Debug::printDiagnostics() {
-     if (!enabled) {
-         return;
-     }
-     
-     info("System", "--- Diagnostics ---");
-     info("System", "Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
-     info("System", "Free PSRAM: " + String(ESP.getFreePsram()) + " bytes");
-     info("System", "Uptime: " + String(millis() / 1000) + " seconds");
-     
-     // Task statistics if using FreeRTOS
-     #ifdef ESP32
-     char taskStats[400] = {0};
-     vTaskList(taskStats);
-     info("System", "Tasks:");
-     Serial.println(taskStats);
-     #endif
-     
-     info("System", "------------------");
- }
+    if (!enabled) {
+        return;
+    }
+    
+    info("System", "--- Diagnostics ---");
+    info("System", "Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
+    info("System", "Free PSRAM: " + String(ESP.getFreePsram()) + " bytes");
+    info("System", "Uptime: " + String(millis() / 1000) + " seconds");
+    
+    // Task statistics if using FreeRTOS with TRACE facility enabled
+    #if defined(configUSE_TRACE_FACILITY) && configUSE_TRACE_FACILITY == 1
+    char taskStats[400] = {0};
+    vTaskList(taskStats);
+    info("System", "Tasks:");
+    Serial.println(taskStats);
+    #else
+    info("System", "Tasks: (Task listing not available - TRACE facility not enabled)");
+    #endif
+    
+    info("System", "------------------");
+}
  
  bool Debug::isEnabled() {
      return enabled;
