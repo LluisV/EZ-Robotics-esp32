@@ -176,39 +176,39 @@
    return status;
  }
  
- bool Motor::startHoming() {
-    if (!stepper || config->endstopPin < 0) {
-      Serial.println("Cannot home " + config->name + ": No endstop configured");
-      return false;
-    }
-    
-    // Save current position
-    homingStartPosition = getPosition();
-    
-    // Set initial status
-    endstopTriggered = false;
-    status = HOMING;
-    
-    // Check if endstop is already triggered
-    if (isEndstopTriggered()) {
-      Serial.println(config->name + " endstop already triggered at start, backing off first");
-      // Start with phase 2 (backing off)
-      homingPhase = 2;
-      stepper->setSpeedInHz(config->maxSpeed);
-      stepper->move(-config->homingDirection * unitsToSteps(config->backoffDistance));
-    } else {
-      // Normal case: Start with phase 1 (moving to endstop)
-      homingPhase = 1;
-      // Set homing speed
-      stepper->setSpeedInHz(config->homeSpeed);
-      // Start moving toward the endstop
-      stepper->move(config->homingDirection * 1000000); // Large value to ensure we hit the endstop
-      Serial.println("Started homing for " + config->name);
-    }
-    
-    lastEndstopCheckTime = millis();
-    return true;
+bool Motor::startHoming() {
+  if (!stepper || config->endstopPin < 0) {
+    Serial.println("Cannot home " + config->name + ": No endstop configured");
+    return false;
   }
+  
+  // Save current position
+  homingStartPosition = getPosition();
+  
+  // Set initial status
+  endstopTriggered = false;
+  status = HOMING;
+  
+  // Check if endstop is already triggered
+  if (isEndstopTriggered()) {
+    Serial.println(config->name + " endstop already triggered at start, backing off first");
+    // Start with phase 2 (backing off)
+    homingPhase = 2;
+    stepper->setSpeedInHz(config->maxSpeed);
+    stepper->move(-config->homingDirection * unitsToSteps(config->backoffDistance));
+  } else {
+    // Normal case: Start with phase 1 (moving to endstop)
+    homingPhase = 1;
+    // Set homing speed
+    stepper->setSpeedInHz(config->homeSpeed);
+    // Start moving toward the endstop
+    stepper->move(config->homingDirection * 1000000); // Large value to ensure we hit the endstop
+    Serial.println("Started homing for " + config->name);
+  }
+  
+  lastEndstopCheckTime = millis();
+  return true;
+}
  
  bool Motor::update() {
    if (!stepper) {
