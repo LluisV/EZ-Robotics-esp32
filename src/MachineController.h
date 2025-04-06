@@ -161,6 +161,17 @@
     */
    std::vector<float> workToMachinePositions(const std::vector<float>& workPos);
 
+   /**
+    * @brief Validate and optionally clamp position to machine limits
+    * @param motorName Motor name
+    * @param position Proposed position
+    * @param clampToLimits If true, clamps the value to limits; if false, returns false when out of limits
+    * @param clampedPosition Output parameter for the clamped position (if clamping)
+    * @return True if within limits (or clamped successfully), false if out of limits (and not clamping)
+    */
+   bool validatePosition(const String& motorName, float position, bool clampToLimits, float& clampedPosition);
+
+
    ConfigManager* configManager;
  };
  

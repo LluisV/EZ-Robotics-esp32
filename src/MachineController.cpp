@@ -4,6 +4,7 @@
  */
 
  #include "MachineController.h"
+ #include "Debug.h"
 
  MachineController::MachineController(MotorManager* motorManager, ConfigManager* configManager)
    : motorManager(motorManager),
@@ -55,76 +56,177 @@
  }
  
  bool MachineController::moveTo(const std::vector<float>& positions, float feedrate, MovementType movementType) {
-   if (!motorManager) {
-     return false;
-   }
-   
-   if (positions.size() != motorManager->getNumMotors()) {
-     Serial.println("Position array size mismatch");
-     return false;
-   }
-   
-   // Set current feedrate
-   currentFeedrate = feedrate;
-   
-   // Convert work coordinates to machine coordinates
-   std::vector<float> machinePos = workToMachinePositions(positions);
-   
-   // For kinematic machines, convert machine coordinates to motor positions
-   std::vector<float> motorPos = machineToMotorPositions(machinePos);
-   
-   // Calculate speed based on feedrate
-   float speedInUnitsPerSec = feedrate / 60.0f; // Convert from mm/min to mm/s
-   
-   // Handle rapid moves at maximum speed
-   if (movementType == RAPID_MOVE) {
-     motorManager->moveToSynchronizedUnits(motorPos); // Use max speed
-   } else {
-     // Implement feedrate for synchronized movements
-     // This is simplified - a more advanced implementation would handle proper
-     // acceleration planning and feedrate control based on path
-     motorManager->moveToSynchronizedUnits(motorPos);
-   }
-   
-   return true;
- }
+  if (!motorManager) {
+    return false;
+  }
+  
+  if (positions.size() != motorManager->getNumMotors()) {
+    Serial.println("Position array size mismatch");
+    return false;
+  }
+  
+  // Validate each position against axis limits
+  std::vector<float> validatedPositions = positions;
+  bool positionOutOfBounds = false;
+  String outOfBoundsMessage = "Position out of bounds: ";
+  
+  for (int i = 0; i < motorManager->getNumMotors(); i++) {
+    Motor* motor = motorManager->getMotor(i);
+    if (motor && !isnan(positions[i])) {
+      float clampedPos = positions[i];
+      if (!validatePosition(motor->getName(), positions[i], false, clampedPos)) {
+        positionOutOfBounds = true;
+        outOfBoundsMessage += motor->getName() + "=" + String(positions[i]) + " ";
+      }
+      validatedPositions[i] = clampedPos;
+    }
+  }
+  
+  // If any position is out of bounds, reject the move
+  if (positionOutOfBounds) {
+    Debug::error("MachineController", outOfBoundsMessage);
+    Serial.println("Error: " + outOfBoundsMessage);
+    return false;
+  }
+  
+  // Set current feedrate
+  currentFeedrate = feedrate;
+  
+  // Convert work coordinates to machine coordinates
+  std::vector<float> machinePos = workToMachinePositions(validatedPositions);
+  
+  // For kinematic machines, convert machine coordinates to motor positions
+  std::vector<float> motorPos = machineToMotorPositions(machinePos);
+  
+  // Calculate speed based on feedrate
+  float speedInUnitsPerSec = feedrate / 60.0f; // Convert from mm/min to mm/s
+  
+  // Handle rapid moves at maximum speed
+  if (movementType == RAPID_MOVE) {
+    motorManager->moveToSynchronizedUnits(motorPos); // Use max speed
+  } else {
+    // Implement feedrate for synchronized movements
+    // This is simplified - a more advanced implementation would handle proper
+    // acceleration planning and feedrate control based on path
+    motorManager->moveToSynchronizedUnits(motorPos);
+  }
+  
+  return true;
+}
  
  bool MachineController::moveTo(float x, float y, float z, float feedrate, MovementType movementType) {
-   std::vector<float> positions;
-   
-   // Find motors by name and set their positions
-   Motor* xMotor = motorManager->getMotorByName("X");
-   Motor* yMotor = motorManager->getMotorByName("Y");
-   Motor* zMotor = motorManager->getMotorByName("Z");
-   
-   // Prepare position array with current positions as defaults
-   std::vector<float> currentPos = getCurrentPosition();
-   positions = currentPos;
-   
-   // Update positions for X, Y, Z if they exist
-   if (xMotor) {
-     int index = motorManager->getMotor(0)->getName() == "X" ? 0 :
-                 motorManager->getMotor(1)->getName() == "X" ? 1 :
-                 2; // Assuming X, Y, Z are the first three motors
-     positions[index] = x;
-   }
-   
-   if (yMotor) {
-     int index = motorManager->getMotor(0)->getName() == "Y" ? 0 :
-                 motorManager->getMotor(1)->getName() == "Y" ? 1 :
-                 2; // Assuming X, Y, Z are the first three motors
-     positions[index] = y;
-   }
-   
-   if (zMotor) {
-     int index = motorManager->getMotor(0)->getName() == "Z" ? 0 :
-                 motorManager->getMotor(1)->getName() == "Z" ? 1 :
-                 2; // Assuming X, Y, Z are the first three motors
-     positions[index] = z;
-   }
-   
-   return moveTo(positions, feedrate, movementType);
- }
+  std::vector<float> positions;
+  
+  // Find motors by name and set their positions
+  Motor* xMotor = motorManager->getMotorByName("X");
+  Motor* yMotor = motorManager->getMotorByName("Y");
+  Motor* zMotor = motorManager->getMotorByName("Z");
+  
+  // Prepare position array with current positions as defaults
+  std::vector<float> currentPos = getCurrentPosition();
+  positions = currentPos;
+  
+  // Flag to track if any position is out of bounds
+  bool positionOutOfBounds = false;
+  String outOfBoundsMessage = "Position out of bounds: ";
+  
+  // Update positions for X, Y, Z if they exist
+  if (xMotor && !isnan(x)) {
+    int index = motorManager->getMotor(0)->getName() == "X" ? 0 :
+               motorManager->getMotor(1)->getName() == "X" ? 1 :
+               2; // Assuming X, Y, Z are the first three motors
+    
+    float clampedX = x;
+    if (!validatePosition("X", x, false, clampedX)) {
+      positionOutOfBounds = true;
+      outOfBoundsMessage += "X=" + String(x) + " ";
+    }
+    positions[index] = clampedX;
+  }
+  
+  if (yMotor && !isnan(y)) {
+    int index = motorManager->getMotor(0)->getName() == "Y" ? 0 :
+               motorManager->getMotor(1)->getName() == "Y" ? 1 :
+               2; // Assuming X, Y, Z are the first three motors
+    
+    float clampedY = y;
+    if (!validatePosition("Y", y, false, clampedY)) {
+      positionOutOfBounds = true;
+      outOfBoundsMessage += "Y=" + String(y) + " ";
+    }
+    positions[index] = clampedY;
+  }
+  
+  if (zMotor && !isnan(z)) {
+    int index = motorManager->getMotor(0)->getName() == "Z" ? 0 :
+               motorManager->getMotor(1)->getName() == "Z" ? 1 :
+               2; // Assuming X, Y, Z are the first three motors
+    
+    float clampedZ = z;
+    if (!validatePosition("Z", z, false, clampedZ)) {
+      positionOutOfBounds = true;
+      outOfBoundsMessage += "Z=" + String(z) + " ";
+    }
+    positions[index] = clampedZ;
+  }
+  
+  // If any position is out of bounds, reject the move
+  if (positionOutOfBounds) {
+    Debug::error("MachineController", outOfBoundsMessage);
+    Serial.println("Error: " + outOfBoundsMessage);
+    return false;
+  }
+  
+  return moveTo(positions, feedrate, movementType);
+}
+
+ 
+ bool MachineController::validatePosition(const String& motorName, float position, bool clampToLimits, float& clampedPosition) {
+  // Default to the input position
+  clampedPosition = position;
+  
+  // Find the motor's configuration to get maxTravel
+  const MotorConfig* motorConfig = nullptr;
+  
+  if (configManager) {
+    motorConfig = configManager->getMotorConfigByName(motorName);
+  }
+  
+  if (!motorConfig) {
+    Debug::warning("MachineController", "No config found for motor " + motorName + " during limit validation");
+    return true; // Allow movement if we can't find config (safer than blocking)
+  }
+  
+  // Home position is 0, maxTravel defines the positive limit
+  const float minLimit = 0.0f;
+  const float maxLimit = motorConfig->maxTravel;
+  
+  // Check if position is within limits
+  bool withinLimits = true;
+  
+  if (position < minLimit) {
+    Debug::warning("MachineController", motorName + " position " + String(position) + 
+                  " below minimum limit of " + String(minLimit));
+    withinLimits = false;
+    
+    if (clampToLimits) {
+      clampedPosition = minLimit;
+      Debug::info("MachineController", "Clamping " + motorName + " to minimum limit " + String(minLimit));
+    }
+  }
+  else if (position > maxLimit) {
+    Debug::warning("MachineController", motorName + " position " + String(position) + 
+                  " exceeds maximum limit of " + String(maxLimit));
+    withinLimits = false;
+    
+    if (clampToLimits) {
+      clampedPosition = maxLimit;
+      Debug::info("MachineController", "Clamping " + motorName + " to maximum limit " + String(maxLimit));
+    }
+  }
+  
+  return withinLimits || clampToLimits;
+}
  
  bool MachineController::executeGCode(const String& command) {
    // This is a simplified G-code interpreter
