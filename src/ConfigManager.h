@@ -59,6 +59,12 @@
    ConfigManager();
    ~ConfigManager();
    
+  /**
+   * @brief Initialize the configuration manager
+   * @return True if successful, false otherwise
+   */
+  bool init();
+
    /**
     * @brief Load configuration from file
     * @return True if successful, false otherwise
@@ -119,6 +125,7 @@
    
    MachineConfig machineConfig;     ///< Machine configuration
    std::vector<MotorConfig> motors; ///< Motor configurations
+   bool spiffsInitialized = false;  ///< Flag to track if SPIFFS is initialized
    
    /**
     * @brief Parse motor configuration from JSON

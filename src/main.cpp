@@ -33,51 +33,51 @@
   * Handles serial communication and G-code parsing with command priority
   */
  void communicationTask(void *parameter) {
-  Debug::info("CommunicationTask", "Task started on Core " + String(xPortGetCoreID()));
-  
-  while (true) {
-    // Check for incoming G-code commands
-    if (Serial.available()) {
-      String command = Serial.readStringUntil('\n');
-      command.trim();
-      
-      if (command.length() > 0) {
-        Debug::verbose("CommunicationTask", "Received command: " + command);
-        
-        // Check for special command prefixes
-        if (command.startsWith("!")) {
-          // Emergency command - highest priority
-          commandQueue.push(command.substring(1), IMMEDIATE);
-          Debug::info("CommunicationTask", "Emergency command queued: " + command);
-          Serial.println("Emergency command queued: " + command);
-        } 
-        else if (command.startsWith("?")) {
-          // Information request - handle directly without queuing
-          String response = commandProcessor->processInfoCommand(command.substring(1));
-          if (!response.isEmpty()) {
-            Debug::info("CommunicationTask", "Sending info response directly: " + response);
-            Serial.println(response);
-          }
-        }
-        else if (command.startsWith("$")) {
-          // Setting command - medium priority
-          commandQueue.push(command.substring(1), SETTING);
-          Debug::verbose("CommunicationTask", "Setting command queued: " + command.substring(1));
-        } 
-        else {
-          // Regular G-code - lowest priority
-          commandQueue.push(command, MOTION);
-          Debug::verbose("CommunicationTask", "Motion command queued: " + command);
-        }
-        
-        Debug::verbose("CommunicationTask", "Queue status: " + String(commandQueue.size()) + " commands in queue");
-      }
-    }
-    
-    // Let the CPU breathe
-    vTaskDelay(1);
-  }
-}
+   Debug::info("CommunicationTask", "Task started on Core " + String(xPortGetCoreID()));
+   
+   while (true) {
+     // Check for incoming G-code commands
+     if (Serial.available()) {
+       String command = Serial.readStringUntil('\n');
+       command.trim();
+       
+       if (command.length() > 0) {
+         Debug::verbose("CommunicationTask", "Received command: " + command);
+         
+         // Check for special command prefixes
+         if (command.startsWith("!")) {
+           // Emergency command - highest priority
+           commandQueue.push(command.substring(1), IMMEDIATE);
+           Debug::info("CommunicationTask", "Emergency command queued: " + command);
+           Serial.println("Emergency command queued: " + command);
+         } 
+         else if (command.startsWith("?")) {
+           // Information request - handle directly without queuing
+           String response = commandProcessor->processInfoCommand(command);
+           if (!response.isEmpty()) {
+             Debug::info("CommunicationTask", "Sending info response directly: " + response);
+             Serial.println(response);
+           }
+         }
+         else if (command.startsWith("$")) {
+           // Setting command - medium priority
+           commandQueue.push(command.substring(1), SETTING);
+           Debug::verbose("CommunicationTask", "Setting command queued: " + command.substring(1));
+         } 
+         else {
+           // Regular G-code - lowest priority
+           commandQueue.push(command, MOTION);
+           Debug::verbose("CommunicationTask", "Motion command queued: " + command);
+         }
+         
+         Debug::verbose("CommunicationTask", "Queue status: " + String(commandQueue.size()) + " commands in queue");
+       }
+     }
+     
+     // Let the CPU breathe
+     vTaskDelay(1);
+   }
+ }
  
  /**
   * @brief Motion control task that runs on Core 1
@@ -87,44 +87,44 @@
    Debug::info("MotionTask", "Task started on Core " + String(xPortGetCoreID()));
    
    while (true) {
-    // Add a null pointer check for safety
-    if (machineController != NULL && gCodeParser != NULL && commandProcessor != NULL) {
-      // First check for immediate commands
-      String immediateCmd = commandQueue.getNextImmediate();
-      
-      if (immediateCmd.length() > 0) {
-        Debug::info("MotionTask", "Processing immediate command: " + immediateCmd);
-        // Process the immediate command
-        if (immediateCmd == "STOP" || immediateCmd == "M112") {
-          // Emergency stop
-          machineController->emergencyStop();
-          Debug::error("MotionTask", "EMERGENCY STOP EXECUTED");
-          Serial.println("EMERGENCY STOP EXECUTED");
-        } else {
-          // Other immediate commands
-          Debug::verbose("MotionTask", "Parsing immediate G-code: " + immediateCmd);
-          gCodeParser->parse(immediateCmd);
-        }
-      }
-      // Then process regular commands if not busy with immediate commands
-      else if (!commandQueue.isEmpty()) {
-        String command = commandQueue.pop();
-        Debug::verbose("MotionTask", "Processing command from queue: " + command);
-        
-        // Directly parse as G-code
-        gCodeParser->parse(command);
-      }
-      
-      // Check and update motor states
-      motorManager.update();
-    } else {
-      Debug::error("MotionTask", "Critical components not initialized!");
-      Serial.println("Warning: Core components not initialized!");
-    }
-    
-    // Let the CPU breathe
-    vTaskDelay(1);
-  }
+     // Add a null pointer check for safety
+     if (machineController != NULL && gCodeParser != NULL && commandProcessor != NULL) {
+       // First check for immediate commands
+       String immediateCmd = commandQueue.getNextImmediate();
+       
+       if (immediateCmd.length() > 0) {
+         Debug::info("MotionTask", "Processing immediate command: " + immediateCmd);
+         // Process the immediate command
+         if (immediateCmd == "STOP" || immediateCmd == "M112") {
+           // Emergency stop
+           machineController->emergencyStop();
+           Debug::error("MotionTask", "EMERGENCY STOP EXECUTED");
+           Serial.println("EMERGENCY STOP EXECUTED");
+         } else {
+           // Other immediate commands
+           Debug::verbose("MotionTask", "Parsing immediate G-code: " + immediateCmd);
+           gCodeParser->parse(immediateCmd);
+         }
+       }
+       // Then process regular commands if not busy with immediate commands
+       else if (!commandQueue.isEmpty()) {
+         String command = commandQueue.pop();
+         Debug::verbose("MotionTask", "Processing command from queue: " + command);
+         
+         // Directly parse as G-code
+         gCodeParser->parse(command);
+       }
+       
+       // Check and update motor states
+       motorManager.update();
+     } else {
+       Debug::error("MotionTask", "Critical components not initialized!");
+       Serial.println("Warning: Core components not initialized!");
+     }
+     
+     // Let the CPU breathe
+     vTaskDelay(1);
+   }
  }
  
  void setup() {
@@ -139,30 +139,55 @@
    Serial.println("CNC Controller starting...");
    Debug::info("Main", "CNC Controller starting up");
    
-   // Mount SPIFFS with format option if needed
-   Debug::timerStart("Main", "SPIFFS Mount");
-   if (!SPIFFS.begin(true)) {
-     Debug::error("Main", "SPIFFS mount failure - halting");
-     Serial.println("SPIFFS Mount Failed even with formatting. Halting...");
-     while (1) { delay(1000); }
-   }
-   Debug::timerEnd("Main", "SPIFFS Mount");
-   Debug::info("Main", "SPIFFS mounted successfully");
+   // Initialize the ConfigManager
+   Debug::timerStart("Main", "ConfigManager Init");
+   int configInitAttempts = 0;
+   bool configInitSuccess = false;
    
-   // Load configuration
+   // Try a few times to initialize SPIFFS
+   while (!configInitSuccess && configInitAttempts < 3) {
+     configInitAttempts++;
+     Debug::info("Main", "ConfigManager init attempt " + String(configInitAttempts));
+     
+     if (configManager.init()) {
+       configInitSuccess = true;
+       Debug::info("Main", "ConfigManager initialized successfully on attempt " + String(configInitAttempts));
+     } else {
+       Debug::warning("Main", "ConfigManager init failed on attempt " + String(configInitAttempts));
+       delay(500); // Wait a bit before retrying
+     }
+   }
+   
+   if (!configInitSuccess) {
+     Debug::error("Main", "Failed to initialize ConfigManager after multiple attempts");
+     Serial.println("WARNING: ConfigManager initialization failed. Running without configuration.");
+     // Don't halt - continue with default configs
+   }
+   
+   Debug::timerEnd("Main", "ConfigManager Init");
+   
+   // Load configuration or use defaults
    Debug::timerStart("Main", "Config Load");
-   if (!configManager.loadConfig()) {
+   bool configLoaded = false;
+   
+   if (configInitSuccess) {
+     configLoaded = configManager.loadConfig();
+   }
+   
+   if (!configLoaded) {
      Debug::warning("Main", "Failed to load configuration, using defaults");
      Serial.println("Failed to load configuration. Using defaults.");
      configManager.useDefaultConfig();
      
-     // Save the default configuration
-     Debug::info("Main", "Attempting to save default configuration");
-     if (configManager.saveConfig()) {
-       Debug::info("Main", "Default configuration saved successfully");
-       Serial.println("Default configuration saved.");
-     } else {
-       Debug::warning("Main", "Failed to save default configuration");
+     // Try to save the default configuration if SPIFFS is available
+     if (configInitSuccess) {
+       Debug::info("Main", "Attempting to save default configuration");
+       if (configManager.saveConfig()) {
+         Debug::info("Main", "Default configuration saved successfully");
+         Serial.println("Default configuration saved.");
+       } else {
+         Debug::warning("Main", "Failed to save default configuration");
+       }
      }
    } else {
      Debug::info("Main", "Configuration loaded successfully");

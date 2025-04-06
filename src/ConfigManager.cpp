@@ -5,41 +5,68 @@
 
  #include <vector>
  #include "ConfigManager.h"
+ #include "Debug.h"
  
  const char* ConfigManager::CONFIG_FILE = "/config.json";
  
  ConfigManager::ConfigManager() {
-   // Initialize SPIFFS if not already initialized
-   if (!SPIFFS.begin(true)) {  // true parameter formats SPIFFS if mount fails
-    Serial.println("SPIFFS Mount Failed. Formatting...");
-    SPIFFS.format();
-    delay(1000);
-    if (!SPIFFS.begin()) {
-      Serial.println("SPIFFS Mount Failed even after formatting. Halting.");
-      while (1) { delay(1000); }
-    }
-  }
+   // Do not initialize SPIFFS in constructor
+   spiffsInitialized = false;
  }
  
  ConfigManager::~ConfigManager() {
-   // Ensure SPIFFS is ended properly
-   SPIFFS.end();
+   // Only end SPIFFS if it was initialized
+   if (spiffsInitialized) {
+     SPIFFS.end();
+   }
+ }
+ 
+ bool ConfigManager::init() {
+   Debug::info("ConfigManager", "Initializing SPIFFS...");
+   
+   // First try formatting SPIFFS explicitly
+   if (!SPIFFS.begin(false)) {
+     Debug::warning("ConfigManager", "SPIFFS mount failed, trying to format...");
+     
+     if (SPIFFS.format()) {
+       Debug::info("ConfigManager", "SPIFFS formatted successfully");
+     } else {
+       Debug::error("ConfigManager", "SPIFFS format failed");
+       return false;
+     }
+     
+     // Try mounting again after format
+     if (!SPIFFS.begin(false)) {
+       Debug::error("ConfigManager", "SPIFFS mount failed even after formatting");
+       return false;
+     }
+   }
+   
+   Debug::info("ConfigManager", "SPIFFS initialized successfully");
+   spiffsInitialized = true;
+   return true;
  }
  
  bool ConfigManager::loadConfig() {
+   // Check if SPIFFS is initialized
+   if (!spiffsInitialized) {
+     Debug::error("ConfigManager", "SPIFFS not initialized");
+     return false;
+   }
+   
    // Clear existing configuration
    motors.clear();
    
    // Check if config file exists
    if (!SPIFFS.exists(CONFIG_FILE)) {
-     Serial.println("Config file not found");
+     Debug::warning("ConfigManager", "Config file not found");
      return false;
    }
    
    // Open config file
    File file = SPIFFS.open(CONFIG_FILE, "r");
    if (!file) {
-     Serial.println("Failed to open config file");
+     Debug::error("ConfigManager", "Failed to open config file");
      return false;
    }
    
@@ -47,7 +74,7 @@
    JsonDocument doc;
    DeserializationError error = deserializeJson(doc, file);
    if (error) {
-     Serial.println("Failed to parse config file: " + String(error.c_str()));
+     Debug::error("ConfigManager", "Failed to parse config file: " + String(error.c_str()));
      file.close();
      return false;
    }
@@ -57,14 +84,14 @@
    
    // Parse machine configuration
    if (!parseMachineConfig(doc["machine"])) {
-     Serial.println("Invalid machine configuration");
+     Debug::error("ConfigManager", "Invalid machine configuration");
      return false;
    }
    
    // Parse motor configurations
    JsonArray motorsArray = doc["motors"].as<JsonArray>();
    if (motorsArray.isNull() || motorsArray.size() == 0) {
-     Serial.println("No motors configured");
+     Debug::error("ConfigManager", "No motors configured");
      return false;
    }
    
@@ -73,16 +100,24 @@
      if (parseMotorConfig(motorJson, config)) {
        motors.push_back(config);
      } else {
-       Serial.println("Failed to parse motor configuration for " + motorJson["name"].as<String>());
+       Debug::warning("ConfigManager", "Failed to parse motor configuration for " + motorJson["name"].as<String>());
        // Continue parsing other motors
      }
    }
    
-   Serial.println("Loaded configuration: " + String(motors.size()) + " motors");
+   Debug::info("ConfigManager", "Loaded configuration: " + String(motors.size()) + " motors");
    return motors.size() > 0;
  }
  
  bool ConfigManager::saveConfig() {
+   // Check if SPIFFS is initialized
+   if (!spiffsInitialized) {
+     Debug::error("ConfigManager", "SPIFFS not initialized");
+     return false;
+   }
+   
+   Debug::info("ConfigManager", "Saving configuration to " + String(CONFIG_FILE));
+   
    // Create a JSON document
    JsonDocument doc;
    
@@ -118,20 +153,20 @@
    // Open file for writing
    File file = SPIFFS.open(CONFIG_FILE, "w");
    if (!file) {
-     Serial.println("Failed to open config file for writing");
+     Debug::error("ConfigManager", "Failed to open config file for writing");
      return false;
    }
    
    // Serialize JSON to file
    if (serializeJson(doc, file) == 0) {
-     Serial.println("Failed to write config file");
+     Debug::error("ConfigManager", "Failed to write config file");
      file.close();
      return false;
    }
    
    // Close the file
    file.close();
-   Serial.println("Configuration saved successfully");
+   Debug::info("ConfigManager", "Configuration saved successfully");
    return true;
  }
  
@@ -157,9 +192,9 @@
    xConfig.reduction = 1.0;
    xConfig.leadScrewPitch = 5.0;
    xConfig.type = LINEAR_AXIS;
-   xConfig.maxSpeed = 5000;
+   xConfig.maxSpeed = 12000;
    xConfig.homeSpeed = 1000;
-   xConfig.acceleration = 1000;
+   xConfig.acceleration = 8000;
    xConfig.homingDirection = -1;
    xConfig.backoffDistance = 5.0;
    xConfig.maxTravel = 240.0;
@@ -176,9 +211,9 @@
    yConfig.reduction = 1.0;
    yConfig.leadScrewPitch = 5.0;
    yConfig.type = LINEAR_AXIS;
-   yConfig.maxSpeed = 5000;
+   yConfig.maxSpeed = 12000;
    yConfig.homeSpeed = 1000;
-   yConfig.acceleration = 1000;
+   yConfig.acceleration = 8000;
    yConfig.homingDirection = -1;
    yConfig.backoffDistance = 5.0;
    yConfig.maxTravel = 350.0;
@@ -195,15 +230,15 @@
    zConfig.reduction = 1.0;
    zConfig.leadScrewPitch = 5.0;
    zConfig.type = LINEAR_AXIS;
-   zConfig.maxSpeed = 5000;
+   zConfig.maxSpeed = 12000;
    zConfig.homeSpeed = 1000;
-   zConfig.acceleration = 1000;
+   zConfig.acceleration = 8000;
    zConfig.homingDirection = -1;
    zConfig.backoffDistance = 5.0;
    zConfig.maxTravel = 125.0;
    motors.push_back(zConfig);
    
-   Serial.println("Using default configuration with 3 axes");
+   Debug::info("ConfigManager", "Using default configuration with 3 axes");
  }
  
  const MotorConfig* ConfigManager::getMotorConfig(int index) const {
@@ -295,15 +330,15 @@
    }
    
    machineConfig.machineName = json["machineName"].is<String>() ? 
-                               json["machineName"].as<String>() : "Default CNC";
+                                json["machineName"].as<String>() : "Default CNC";
    machineConfig.defaultFeedrate = json["defaultFeedrate"].is<float>() ? 
-                                  json["defaultFeedrate"].as<float>() : 1000.0f;
+                                   json["defaultFeedrate"].as<float>() : 1000.0f;
    machineConfig.maxFeedrate = json["maxFeedrate"].is<float>() ? 
-                              json["maxFeedrate"].as<float>() : 5000.0f;
+                               json["maxFeedrate"].as<float>() : 5000.0f;
    machineConfig.junctionDeviation = json["junctionDeviation"].is<float>() ? 
-                                    json["junctionDeviation"].as<float>() : 0.01f;
+                                     json["junctionDeviation"].as<float>() : 0.01f;
    machineConfig.arcTolerance = json["arcTolerance"].is<float>() ? 
-                               json["arcTolerance"].as<float>() : 0.002f;
+                                json["arcTolerance"].as<float>() : 0.002f;
    
    return true;
  }
