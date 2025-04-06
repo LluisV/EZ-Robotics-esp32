@@ -91,7 +91,8 @@
      if (machineController != NULL && gCodeParser != NULL && commandProcessor != NULL) {
        // First check for immediate commands
        String immediateCmd = commandQueue.getNextImmediate();
-       
+       immediateCmd.toUpperCase();
+
        if (immediateCmd.length() > 0) {
          Debug::info("MotionTask", "Processing immediate command: " + immediateCmd);
          // Process the immediate command
