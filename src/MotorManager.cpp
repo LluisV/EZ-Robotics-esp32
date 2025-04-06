@@ -113,7 +113,6 @@ Motor* MotorManager::getMotorByName(const String& name) {
     }
   }
   
-  Debug::verbose("MotorManager", "No motors are currently moving");
   return false;
 }
  

@@ -9,9 +9,6 @@
  #include <Arduino.h>
  #include "MachineController.h"
  
- /**
-  * @brief Command processor class
-  */
  class CommandProcessor {
  public:
    /**
@@ -41,6 +38,14 @@
     * @return True if command was processed successfully
     */
    bool processSettingCommand(const String& command);
+ 
+   /**
+    * @brief Get pointer to the MachineController
+    * @return MachineController pointer
+    */
+   MachineController* getMachineController() {
+     return machineController;
+   }
  
  private:
    MachineController* machineController;  ///< MachineController reference
