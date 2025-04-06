@@ -117,98 +117,8 @@ Motor* MotorManager::getMotorByName(const String& name) {
   return false;
 }
  
-bool MotorManager::moveToRapid(const std::vector<float>& positions) {
-  // For rapid moves, we use the maximum speed of each motor while still
-  // ensuring synchronization of completion time
-  
-  Debug::verbose("MotorManager", "Starting rapid synchronized move");
-  
-  if (positions.size() != motors.size()) {
-    Debug::error("MotorManager", "Position array size mismatch in rapid move");
-    return false;
-  }
-  
-  // Calculate distances and max durations for each motor
-  std::vector<float> currentPositions(motors.size());
-  std::vector<float> distances(motors.size());
-  std::vector<float> durations(motors.size());
-  float maxDuration = 0.0f;
-  
-  // Get current positions and calculate distances
-  for (size_t i = 0; i < motors.size(); i++) {
-    currentPositions[i] = motors[i]->getPositionInUnits();
-    distances[i] = positions[i] - currentPositions[i];
-    
-    // Calculate time using maximum speed
-    const MotorConfig* config = motors[i]->getConfig();
-    float maxSpeedInUnitsPerSec = motors[i]->stepsToUnits(config->maxSpeed); // Convert steps/sec to units/sec
-    
-    // Time to travel the distance at max speed
-    if (abs(distances[i]) > 0.0001f && maxSpeedInUnitsPerSec > 0.0001f) {
-      durations[i] = abs(distances[i]) / maxSpeedInUnitsPerSec;
-    } else {
-      durations[i] = 0.0f;
-    }
-    
-    // Find the maximum duration
-    if (durations[i] > maxDuration) {
-      maxDuration = durations[i];
-    }
-    
-    Debug::verbose("MotorManager", motors[i]->getName() + " rapid move: distance=" + 
-                  String(distances[i]) + ", max speed=" + String(maxSpeedInUnitsPerSec) + 
-                  ", duration=" + String(durations[i]));
-  }
-  
-  // Calculate acceleration scaling to ensure synchronized arrival
-  // This is a key improvement for proper synchronization
-  std::vector<float> accelerationScaling(motors.size(), 1.0f);
-  for (size_t i = 0; i < motors.size(); i++) {
-    if (maxDuration > 0.0001f && durations[i] > 0.0001f) {
-      // Scale both speed and acceleration proportionally to match longest move
-      accelerationScaling[i] = durations[i] / maxDuration;
-      
-      // We scale acceleration by square of time ratio to maintain proper profiles
-      accelerationScaling[i] = accelerationScaling[i] * accelerationScaling[i];
-    }
-  }
-  
-  // Execute the moves with adjusted acceleration and speed to synchronize
-  bool success = true;
-  for (size_t i = 0; i < motors.size(); i++) {
-    if (abs(distances[i]) > 0.0001f) {
-      const MotorConfig* config = motors[i]->getConfig();
-      
-      // Calculate adjusted speed and acceleration
-      int adjustedAccel = config->acceleration * accelerationScaling[i];
-      // Ensure acceleration is at least 100 steps/s² to avoid extremely slow starts
-      adjustedAccel = max(100, adjustedAccel);
-      
-      // Set the acceleration
-      motors[i]->setAcceleration(adjustedAccel);
-      
-      // Calculate adjusted speed to match the longest duration
-      float adjustedSpeed = abs(distances[i]) / maxDuration;
-      int speedInSteps = motors[i]->unitsToSteps(adjustedSpeed);
-      motors[i]->setSpeed(speedInSteps);
-      
-      // Start the move using the motor's maximum speed for rapid movements
-      // Pass the adjusted speed explicitly to ensure it's used
-      success &= motors[i]->moveToUnits(positions[i], adjustedSpeed);
-      
-      Debug::verbose("MotorManager", motors[i]->getName() + " rapid move configured: accel scaling=" + 
-                     String(accelerationScaling[i]) + ", adjusted accel=" + String(adjustedAccel) +
-                     ", adjusted speed=" + String(adjustedSpeed) + " units/sec");
-    }
-  }
-  
-  return success;
-}
-
 bool MotorManager::moveToFeedrate(const std::vector<float>& positions, float feedrate) {
-  // For feedrate moves (G1), we respect the specified feedrate and ensure 
-  // synchronized completion with proper acceleration profiles
-  
+  // For feedrate moves (G1), we need to ensure all motors start and finish together
   Debug::verbose("MotorManager", "Starting synchronized move with feedrate: " + String(feedrate) + " mm/min");
   
   if (positions.size() != motors.size()) {
@@ -216,151 +126,242 @@ bool MotorManager::moveToFeedrate(const std::vector<float>& positions, float fee
     return false;
   }
   
-  // Get current positions in user units
+  // Get current positions and calculate distances
   std::vector<float> currentPositions(motors.size());
+  std::vector<float> distances(motors.size());
+  
+  // Calculate total Cartesian distance for the move (for proper feedrate calculation)
+  float totalDistanceSquared = 0.0f;
+  
   for (size_t i = 0; i < motors.size(); i++) {
     currentPositions[i] = motors[i]->getPositionInUnits();
+    distances[i] = positions[i] - currentPositions[i];
+    totalDistanceSquared += distances[i] * distances[i];
+    
+    Debug::verbose("MotorManager", motors[i]->getName() + 
+                  " move distance: " + String(distances[i]) + " units");
   }
   
-  // Calculate Cartesian distance for the move
-  float totalDistanceSquared = 0.0f;
-  for (size_t i = 0; i < motors.size(); i++) {
-    float delta = positions[i] - currentPositions[i];
-    totalDistanceSquared += delta * delta;
-  }
   float totalDistance = sqrt(totalDistanceSquared);
   
-  // Calculate ideal move duration based on feedrate
+  // Calculate the move duration based on the feedrate
   float feedrateInUnitsPerSec = feedrate / 60.0f; // Convert mm/min to mm/sec
-  float idealDuration = (totalDistance > 0.0001f) ? (totalDistance / feedrateInUnitsPerSec) : 0.0f;
+  float moveDuration = (totalDistance > 0.0001f) ? (totalDistance / feedrateInUnitsPerSec) : 0.0f;
   
   Debug::verbose("MotorManager", "Feedrate move: total distance=" + String(totalDistance) + 
                 " units, feedrate=" + String(feedrateInUnitsPerSec) + 
-                " units/sec, ideal duration=" + String(idealDuration) + " sec");
+                " units/sec, ideal duration=" + String(moveDuration) + " sec");
   
-  // Calculate the required speeds and check against max speeds
-  std::vector<float> speeds(motors.size());
-  std::vector<float> distances(motors.size());
-  bool feedrateExceedsLimit = false;
+  // Calculate the required speeds for each motor
+  std::vector<float> requiredSpeeds(motors.size());
+  bool needToScaleFeedrate = false;
+  float maxSpeedRatio = 0.0f;
   
   for (size_t i = 0; i < motors.size(); i++) {
-    distances[i] = positions[i] - currentPositions[i];
-    
-    // Calculate the required speed for this motor to follow the feedrate
-    if (idealDuration > 0.0001f) {
-      speeds[i] = abs(distances[i]) / idealDuration;
+    // Calculate the speed needed for this motor to complete at the same time as others
+    if (moveDuration > 0.0001f) {
+      requiredSpeeds[i] = abs(distances[i]) / moveDuration; // units/sec
     } else {
-      speeds[i] = 0.0f;
+      requiredSpeeds[i] = 0.0f;
     }
-    
-    // Convert to steps/sec for comparison with motor limits
-    const MotorConfig* config = motors[i]->getConfig();
-    int speedInSteps = motors[i]->unitsToSteps(speeds[i]);
     
     // Check if speed exceeds motor's capability
-    if (speedInSteps > config->maxSpeed) {
-      feedrateExceedsLimit = true;
-      Debug::warning("MotorManager", motors[i]->getName() + " required speed " + 
-                    String(speedInSteps) + " steps/sec exceeds max " + 
-                    String(config->maxSpeed) + " steps/sec");
-    }
+    const MotorConfig* config = motors[i]->getConfig();
+    int speedInSteps = motors[i]->unitsToSteps(requiredSpeeds[i]);
     
-    Debug::verbose("MotorManager", motors[i]->getName() + " move: distance=" + 
-                  String(distances[i]) + ", required speed=" + String(speeds[i]) + 
-                  " units/sec (" + String(speedInSteps) + " steps/sec)");
-  }
-  
-  // If feedrate exceeds machine capabilities, scale it down
-  float durationScaling = 1.0f;
-  if (feedrateExceedsLimit) {
-    // Find the most limiting motor
-    float maxSpeedRatio = 0.0f;
-    for (size_t i = 0; i < motors.size(); i++) {
-      const MotorConfig* config = motors[i]->getConfig();
-      int speedInSteps = motors[i]->unitsToSteps(speeds[i]);
-      
-      float speedRatio = (config->maxSpeed > 0) ? 
-                         ((float)speedInSteps / (float)config->maxSpeed) : 0.0f;
-                         
+    if (config->maxSpeed > 0 && speedInSteps > 0) {
+      float speedRatio = (float)speedInSteps / (float)config->maxSpeed;
       if (speedRatio > maxSpeedRatio) {
         maxSpeedRatio = speedRatio;
+        if (speedRatio > 1.0f) {
+          needToScaleFeedrate = true;
+        }
       }
     }
     
-    // Scale the duration to ensure we don't exceed max speeds
-    if (maxSpeedRatio > 1.0f) {
-      durationScaling = maxSpeedRatio;
-      Debug::warning("MotorManager", "Feedrate exceeds machine capabilities by factor of " + 
-                    String(maxSpeedRatio) + ". Scaling down.");
+    Debug::verbose("MotorManager", motors[i]->getName() + " requires " + 
+                  String(requiredSpeeds[i]) + " units/sec (" + 
+                  String(speedInSteps) + " steps/sec), max: " + 
+                  String(config->maxSpeed) + " steps/sec");
+  }
+  
+  // If any motor's required speed exceeds its maximum, scale all speeds down proportionally
+  float speedScaleFactor = 1.0f;
+  if (needToScaleFeedrate && maxSpeedRatio > 1.0f) {
+    speedScaleFactor = 1.0f / maxSpeedRatio;
+    moveDuration *= maxSpeedRatio; // Extend duration proportionally
+    
+    Debug::warning("MotorManager", "Feedrate exceeds machine capabilities by factor of " + 
+                  String(maxSpeedRatio) + ". Scaling down speeds by " + 
+                  String(speedScaleFactor));
+  }
+  
+  // Now set up each motor with adjusted speeds and execute moves
+  bool success = true;
+  
+  // Track max acceleration time to ensure all motors have proper acceleration profiles
+  float maxAccelTime = 0;
+  std::vector<float> accelTimes(motors.size());
+  
+  // First pass: calculate acceleration times for each motor
+  for (size_t i = 0; i < motors.size(); i++) {
+    if (abs(distances[i]) < 0.0001f) {
+      accelTimes[i] = 0;
+      continue;
+    }
+    
+    const MotorConfig* config = motors[i]->getConfig();
+    float adjustedSpeed = requiredSpeeds[i] * speedScaleFactor;
+    
+    // Calculate time to reach target speed with configured acceleration
+    float accelInUnits = motors[i]->stepsToUnits(config->acceleration);
+    accelTimes[i] = adjustedSpeed / accelInUnits;
+    
+    if (accelTimes[i] > maxAccelTime) {
+      maxAccelTime = accelTimes[i];
     }
   }
   
-  // Calculate adjusted duration and speeds
-  float adjustedDuration = idealDuration * durationScaling;
-  
-  // Calculate acceleration scaling to ensure synchronized arrival
-  // For professional-grade movement, we need to consider acceleration profiles
-  std::vector<float> accelerationScaling(motors.size(), 1.0f);
-  
+  // Second pass: adjust accelerations to ensure synchronized movement
   for (size_t i = 0; i < motors.size(); i++) {
+    if (abs(distances[i]) < 0.0001f) {
+      continue; // Skip motors that don't need to move
+    }
+    
     const MotorConfig* config = motors[i]->getConfig();
     
-    // Calculate time needed for acceleration and deceleration at max acceleration
-    float accelTimeToReachSpeed = speeds[i] / motors[i]->stepsToUnits(config->acceleration);
+    // Calculate adjusted speed (scaled if necessary)
+    float adjustedSpeed = requiredSpeeds[i] * speedScaleFactor;
+    int speedInSteps = motors[i]->unitsToSteps(adjustedSpeed);
     
-    // Total time spent in acceleration/deceleration phases
-    float totalAccelTime = accelTimeToReachSpeed * 2.0f; // Accel + decel
-    
-    // Calculate distance covered during acceleration/deceleration
-    float accelDistance = 0.5f * speeds[i] * accelTimeToReachSpeed * 2.0f;
-    
-    // If acceleration distance exceeds total distance, we need to adjust
-    if (accelDistance > abs(distances[i]) && abs(distances[i]) > 0.0001f) {
-      // This is a "triangle" velocity profile (no constant velocity phase)
-      // Scale acceleration to fit the shorter distance
-      float accelScale = sqrt(abs(distances[i]) / accelDistance);
-      accelerationScaling[i] = accelScale;
-      
-      Debug::verbose("MotorManager", motors[i]->getName() + " uses triangle profile, " +
-                    "accel scaling=" + String(accelScale));
-    } else {
-      Debug::verbose("MotorManager", motors[i]->getName() + " uses trapezoidal profile");
+    // Adjust acceleration to match the acceleration profile of the slowest motor
+    // This ensures all motors reach their speeds in the same amount of time
+    float accelRatio = 1.0f;
+    if (accelTimes[i] > 0.0001f) {
+      accelRatio = accelTimes[i] / maxAccelTime;
     }
-  }
-  
-  // Execute the moves with properly adjusted parameters
-  bool success = true;
-  for (size_t i = 0; i < motors.size(); i++) {
-    if (abs(distances[i]) > 0.0001f) {
-      const MotorConfig* config = motors[i]->getConfig();
-      
-      // Calculate adjusted speed
-      float adjustedSpeed = speeds[i] / durationScaling;
-      int speedInSteps = motors[i]->unitsToSteps(adjustedSpeed);
-      
-      // Apply acceleration scaling for proper synchronization
-      int adjustedAccel = config->acceleration * accelerationScaling[i];
-      // Ensure acceleration is at least 100 steps/s² to avoid extremely slow starts
-      adjustedAccel = max(100, adjustedAccel);
-      
-      // Set parameters and execute move
-      motors[i]->setAcceleration(adjustedAccel);
-      motors[i]->setSpeed(speedInSteps);
-      
-      // Instead of just calling moveToUnits, explicitly pass the speed
-      success &= motors[i]->moveToUnits(positions[i], adjustedSpeed);
-      
-      Debug::verbose("MotorManager", motors[i]->getName() + " feedrate move configured: " +
-                    "speed=" + String(adjustedSpeed) + " units/sec (" + String(speedInSteps) + 
-                    " steps/sec), accel=" + String(adjustedAccel) + " steps/sec²");
-    }
+    
+    int adjustedAccel = config->acceleration * accelRatio;
+    // Ensure a minimum acceleration
+    adjustedAccel = max(adjustedAccel, 100);
+    
+    // Configure motor parameters
+    motors[i]->setAcceleration(adjustedAccel);
+    motors[i]->setSpeed(speedInSteps);
+    
+    Debug::verbose("MotorManager", motors[i]->getName() + " config: " +
+                  "speed=" + String(adjustedSpeed) + " units/sec, " +
+                  "accel=" + String(adjustedAccel) + " steps/sec² " +
+                  "(ratio: " + String(accelRatio) + ")");
+    
+    // Start the move
+    success &= motors[i]->moveToUnits(positions[i], adjustedSpeed);
   }
   
   return success;
 }
 
- 
- void MotorManager::stopAll(bool immediate) {
+bool MotorManager::moveToRapid(const std::vector<float>& positions) {
+  // For rapid moves (G0), we aim for synchronized motion at max speeds
+  Debug::verbose("MotorManager", "Starting rapid synchronized move");
+  
+  if (positions.size() != motors.size()) {
+    Debug::error("MotorManager", "Position array size mismatch in rapid move");
+    return false;
+  }
+  
+  // Calculate distances and the time each motor would take at max speed
+  std::vector<float> currentPositions(motors.size());
+  std::vector<float> distances(motors.size());
+  std::vector<float> moveTimes(motors.size());
+  float maxMoveTime = 0.0f;
+  
+  for (size_t i = 0; i < motors.size(); i++) {
+    currentPositions[i] = motors[i]->getPositionInUnits();
+    distances[i] = positions[i] - currentPositions[i];
+    
+    // Skip calculation if distance is negligible
+    if (abs(distances[i]) < 0.0001f) {
+      moveTimes[i] = 0.0f;
+      continue;
+    }
+    
+    // Calculate time to move this distance at max speed
+    const MotorConfig* config = motors[i]->getConfig();
+    float maxSpeedInUnits = motors[i]->stepsToUnits(config->maxSpeed);
+    moveTimes[i] = abs(distances[i]) / maxSpeedInUnits;
+    
+    // Find the maximum move time
+    if (moveTimes[i] > maxMoveTime) {
+      maxMoveTime = moveTimes[i];
+    }
+    
+    Debug::verbose("MotorManager", motors[i]->getName() + " rapid move: " + 
+                  "distance=" + String(distances[i]) + " units, " +
+                  "max speed=" + String(maxSpeedInUnits) + " units/sec, " +
+                  "time=" + String(moveTimes[i]) + " sec");
+  }
+  
+  // Adjust speeds to ensure all motors finish simultaneously
+  bool success = true;
+  
+  // Calculate acceleration times at max acceleration
+  float maxAccelTime = 0;
+  std::vector<float> maxSpeedTimes(motors.size());
+  std::vector<float> adjustedSpeeds(motors.size());
+  
+  for (size_t i = 0; i < motors.size(); i++) {
+    if (abs(distances[i]) < 0.0001f) {
+      continue; // Skip motors that don't need to move
+    }
+    
+    // Calculate adjusted speed to match the longest move time
+    adjustedSpeeds[i] = abs(distances[i]) / maxMoveTime;
+    
+    // Calculate time to reach this speed at max acceleration
+    const MotorConfig* config = motors[i]->getConfig();
+    float accelInUnits = motors[i]->stepsToUnits(config->acceleration);
+    maxSpeedTimes[i] = adjustedSpeeds[i] / accelInUnits;
+    
+    if (maxSpeedTimes[i] > maxAccelTime) {
+      maxAccelTime = maxSpeedTimes[i];
+    }
+  }
+  
+  // Now adjust accelerations to ensure all motors reach their speeds in sync
+  for (size_t i = 0; i < motors.size(); i++) {
+    if (abs(distances[i]) < 0.0001f) {
+      continue; // Skip motors that don't need to move
+    }
+    
+    const MotorConfig* config = motors[i]->getConfig();
+    int speedInSteps = motors[i]->unitsToSteps(adjustedSpeeds[i]);
+    
+    // Adjust acceleration to ensure synchronization
+    float accelRatio = 1.0f;
+    if (maxSpeedTimes[i] > 0.0001f) {
+      accelRatio = maxSpeedTimes[i] / maxAccelTime;
+    }
+    
+    int adjustedAccel = config->acceleration * accelRatio;
+    // Ensure a minimum acceleration
+    adjustedAccel = max(adjustedAccel, 100);
+    
+    motors[i]->setAcceleration(adjustedAccel);
+    motors[i]->setSpeed(speedInSteps);
+    
+    Debug::verbose("MotorManager", motors[i]->getName() + " rapid config: " +
+                  "adjusted speed=" + String(adjustedSpeeds[i]) + " units/sec, " +
+                  "accel=" + String(adjustedAccel) + " steps/sec² " +
+                  "(ratio: " + String(accelRatio) + ")");
+    
+    // Start the move
+    success &= motors[i]->moveToUnits(positions[i], adjustedSpeeds[i]);
+  }
+  
+  return success;
+}
+void MotorManager::stopAll(bool immediate) {
   Debug::info("MotorManager", "Stopping all motors" + 
               String(immediate ? " (IMMEDIATE)" : " (DECELERATE)"));
   
