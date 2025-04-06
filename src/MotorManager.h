@@ -59,19 +59,20 @@
     */
    bool isAnyMotorMoving() const;
    
-   /**
-    * @brief Perform synchronized move of multiple motors
-    * @param positions Array of target positions in steps
-    * @return True if the move was started, false otherwise
-    */
-   bool moveToSynchronized(const std::vector<long>& positions);
-   
-   /**
-    * @brief Perform synchronized move of multiple motors in user units
-    * @param positions Array of target positions in user units
-    * @return True if the move was started, false otherwise
-    */
-   bool moveToSynchronizedUnits(const std::vector<float>& positions);
+ /**
+   * @brief Perform rapid (maximum speed) synchronized move of multiple motors
+   * @param positions Array of target positions in user units
+   * @return True if the move was started, false otherwise
+   */
+  bool moveToRapid(const std::vector<float>& positions);
+  
+  /**
+   * @brief Perform synchronized move of multiple motors at specified feedrate
+   * @param positions Array of target positions in user units
+   * @param feedrate Feedrate in mm/min
+   * @return True if the move was started, false otherwise
+   */
+  bool moveToFeedrate(const std::vector<float>& positions, float feedrate);
    
    /**
     * @brief Stop all motors

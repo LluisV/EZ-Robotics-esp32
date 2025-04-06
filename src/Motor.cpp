@@ -13,7 +13,8 @@
      endstopTriggered(false), 
      homingStartPosition(0),
      lastEndstopCheckTime(0),
-     homingPhase(0)
+     homingPhase(0),
+     currentSpeed(0)
  {
  }
  
@@ -48,6 +49,24 @@
               ", Dir: " + String(config->dirPin) + 
               ", MaxSpeed: " + String(config->maxSpeed) + ")");
   return true;
+}
+
+// Update the setSpeed method to store the speed:
+void Motor::setSpeed(int speedInSteps) {
+  currentSpeed = speedInSteps;  // Store the speed
+  if (stepper) {
+    stepper->setSpeedInHz(speedInSteps);
+    Debug::verbose("Motor", getName() + " speed set to " + String(speedInSteps) + " steps/sec");
+  }
+}
+
+// Update the setAcceleration method to store the acceleration:
+void Motor::setAcceleration(int acceleration) {
+  currentAcceleration = acceleration;  // Store the acceleration
+  if (stepper) {
+    stepper->setAcceleration(acceleration);
+    Debug::verbose("Motor", getName() + " acceleration set to " + String(acceleration) + " steps/sec²");
+  }
 }
  
  void Motor::setPosition(long position) {
@@ -112,13 +131,32 @@
     return false;
   }
   
-  // Set speed if specified
+  // Set speed if specified, otherwise use the stored speed
   if (speed > 0) {
     stepper->setSpeedInHz(speed);
     Debug::verbose("Motor", "Setting custom speed " + String(speed) + 
                    " for motor " + config->name);
+  } else if (currentSpeed > 0) {
+    stepper->setSpeedInHz(currentSpeed);
+    Debug::verbose("Motor", "Using stored speed " + String(currentSpeed) + 
+                   " for motor " + config->name);
   } else {
     stepper->setSpeedInHz(config->maxSpeed);
+    Debug::verbose("Motor", "Using max speed " + String(config->maxSpeed) + 
+                   " for motor " + config->name);
+  }
+  
+  // Set acceleration if necessary
+  if (currentAcceleration > 0) {
+    // In case we haven't set the acceleration since initialization
+    stepper->setAcceleration(currentAcceleration);
+    Debug::verbose("Motor", "Using stored acceleration " + String(currentAcceleration) + 
+                   " for motor " + config->name);
+  } else {
+    // Use default acceleration from config
+    stepper->setAcceleration(config->acceleration);
+    Debug::verbose("Motor", "Using default acceleration " + String(config->acceleration) + 
+                   " for motor " + config->name);
   }
   
   // Start the move
@@ -127,16 +165,17 @@
   
   Debug::verbose("Motor", "Moving " + config->name + 
                  " to position " + String(position) + 
-                 " at speed " + String(stepper->getMaxSpeedInMilliHz()));
+                 " at speed " + String(stepper->getMaxSpeedInMilliHz()) +
+                 ", acceleration " + String(currentAcceleration > 0 ? currentAcceleration : config->acceleration));
   
   return true;
 }
  
- bool Motor::moveToUnits(float position, float speed) {
-   long steps = unitsToSteps(position);
-   int stepsPerSec = speed > 0.0f ? unitsToSteps(speed) : 0;
-   return moveTo(steps, stepsPerSec);
- }
+bool Motor::moveToUnits(float position, float speed) {
+  long steps = unitsToSteps(position);
+  int stepsPerSec = speed > 0.0f ? unitsToSteps(speed) : 0;
+  return moveTo(steps, stepsPerSec);
+}
  
  bool Motor::moveRelative(long steps, int speed) {
    if (!stepper || status == HOMING) {

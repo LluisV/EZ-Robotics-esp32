@@ -155,6 +155,18 @@
     * @return True if endstop is triggered, false otherwise
     */
    bool isEndstopTriggered() const;
+
+   /**
+   * @brief Set the acceleration for this motor
+   * @param acceleration Acceleration in steps/second²
+   */
+  void setAcceleration(int acceleration);
+  
+  /**
+   * @brief Set the speed for this motor
+   * @param speedInSteps Speed in steps/second
+   */
+  void setSpeed(int speedInSteps);
    
  private:
    const MotorConfig* config;          ///< Motor configuration
@@ -164,6 +176,8 @@
    long homingStartPosition;           ///< Starting position for homing
    unsigned long lastEndstopCheckTime; ///< Time of last endstop check
    int homingPhase;                    ///< Current phase in the homing sequence
+   int currentSpeed;                   ///< Current speed in steps/second
+   int currentAcceleration; ///< Current acceleration in steps/second²
  };
  
  #endif // MOTOR_H

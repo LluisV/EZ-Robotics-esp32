@@ -55,17 +55,20 @@
    return motorManager->homeMotorByName(axisName);
  }
  
+ 
  bool MachineController::moveTo(const std::vector<float>& positions, float feedrate, MovementType movementType) {
   if (!motorManager) {
+    Debug::error("MachineController", "No motor manager available");
     return false;
   }
   
   if (positions.size() != motorManager->getNumMotors()) {
-    Serial.println("Position array size mismatch");
+    Debug::error("MachineController", "Position array size mismatch: " + 
+                String(positions.size()) + " vs " + String(motorManager->getNumMotors()));
     return false;
   }
   
-  // Validate each position against axis limits
+  // Validate positions against limits
   std::vector<float> validatedPositions = positions;
   bool positionOutOfBounds = false;
   String outOfBoundsMessage = "Position out of bounds: ";
@@ -89,32 +92,29 @@
     return false;
   }
   
-  // Set current feedrate
+  // Set current feedrate for future commands
   currentFeedrate = feedrate;
   
   // Convert work coordinates to machine coordinates
   std::vector<float> machinePos = workToMachinePositions(validatedPositions);
   
   // For kinematic machines, convert machine coordinates to motor positions
-  std::vector<float> motorPos = machineToMotorPositions(machinePos);
+  std::vector<float> targetMotorPos = machineToMotorPositions(machinePos);
   
-  // Calculate speed based on feedrate
-  float speedInUnitsPerSec = feedrate / 60.0f; // Convert from mm/min to mm/s
-  
-  // Handle rapid moves at maximum speed
+  // Handle different movement types
   if (movementType == RAPID_MOVE) {
-    motorManager->moveToSynchronizedUnits(motorPos); // Use max speed
+    // G0: Rapid move - use maximum speed regardless of feedrate
+    Debug::verbose("MachineController", "Executing RAPID_MOVE (G0) at maximum speed");
+    return motorManager->moveToRapid(targetMotorPos);
   } else {
-    // Implement feedrate for synchronized movements
-    // This is simplified - a more advanced implementation would handle proper
-    // acceleration planning and feedrate control based on path
-    motorManager->moveToSynchronizedUnits(motorPos);
+    // G1: Linear move - use specified feedrate
+    Debug::verbose("MachineController", "Executing LINEAR_MOVE (G1) with feedrate: " + String(feedrate) + " mm/min");
+    return motorManager->moveToFeedrate(targetMotorPos, feedrate);
   }
-  
-  return true;
 }
  
- bool MachineController::moveTo(float x, float y, float z, float feedrate, MovementType movementType) {
+
+bool MachineController::moveTo(float x, float y, float z, float feedrate, MovementType movementType) {
   std::vector<float> positions;
   
   // Find motors by name and set their positions
@@ -126,55 +126,26 @@
   std::vector<float> currentPos = getCurrentPosition();
   positions = currentPos;
   
-  // Flag to track if any position is out of bounds
-  bool positionOutOfBounds = false;
-  String outOfBoundsMessage = "Position out of bounds: ";
-  
-  // Update positions for X, Y, Z if they exist
+  // Update positions for X, Y, Z if they exist and values are specified
   if (xMotor && !isnan(x)) {
     int index = motorManager->getMotor(0)->getName() == "X" ? 0 :
                motorManager->getMotor(1)->getName() == "X" ? 1 :
                2; // Assuming X, Y, Z are the first three motors
-    
-    float clampedX = x;
-    if (!validatePosition("X", x, false, clampedX)) {
-      positionOutOfBounds = true;
-      outOfBoundsMessage += "X=" + String(x) + " ";
-    }
-    positions[index] = clampedX;
+    positions[index] = x;
   }
   
   if (yMotor && !isnan(y)) {
     int index = motorManager->getMotor(0)->getName() == "Y" ? 0 :
                motorManager->getMotor(1)->getName() == "Y" ? 1 :
                2; // Assuming X, Y, Z are the first three motors
-    
-    float clampedY = y;
-    if (!validatePosition("Y", y, false, clampedY)) {
-      positionOutOfBounds = true;
-      outOfBoundsMessage += "Y=" + String(y) + " ";
-    }
-    positions[index] = clampedY;
+    positions[index] = y;
   }
   
   if (zMotor && !isnan(z)) {
     int index = motorManager->getMotor(0)->getName() == "Z" ? 0 :
                motorManager->getMotor(1)->getName() == "Z" ? 1 :
                2; // Assuming X, Y, Z are the first three motors
-    
-    float clampedZ = z;
-    if (!validatePosition("Z", z, false, clampedZ)) {
-      positionOutOfBounds = true;
-      outOfBoundsMessage += "Z=" + String(z) + " ";
-    }
-    positions[index] = clampedZ;
-  }
-  
-  // If any position is out of bounds, reject the move
-  if (positionOutOfBounds) {
-    Debug::error("MachineController", outOfBoundsMessage);
-    Serial.println("Error: " + outOfBoundsMessage);
-    return false;
+    positions[index] = z;
   }
   
   return moveTo(positions, feedrate, movementType);
