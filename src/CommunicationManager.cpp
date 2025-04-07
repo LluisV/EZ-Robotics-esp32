@@ -48,7 +48,7 @@
  bool CommunicationManager::update() {
    // Check for serial data
    while (Serial.available() > 0) {
-     char c = Serial.read();
+    char c = Serial.read();
      
      // Check if we're in file receive mode
      if (fileTransfer.mode == TRANSFER_RECEIVING) {
@@ -528,70 +528,105 @@
  }
  
  bool CommunicationManager::handleFileReceiveData() {
-   // Check if we have data to read
-   if (Serial.available() <= 0) {
-     return true;
-   }
-   
-   // Make sure we're in receive mode
-   if (fileTransfer.mode != TRANSFER_RECEIVING) {
-     Debug::error("CommunicationManager", "Not in file receive mode");
-     return false;
-   }
-   
-   // Open the file for writing if not already open
-   File file = SPIFFS.open(fileTransfer.filename, "a");
-   if (!file) {
-     Debug::error("CommunicationManager", "Failed to open file for writing: " + fileTransfer.filename);
-     cancelFileTransfer("Failed to open file for writing");
-     return false;
-   }
-   
-   // Read data in chunks and write to file
-   const size_t bufferSize = 256;
-   uint8_t buffer[bufferSize];
-   size_t bytesAvailable = Serial.available();
-   size_t bytesToRead = min(bytesAvailable, bufferSize);
-   
-   size_t bytesRead = Serial.readBytes(buffer, bytesToRead);
-   size_t bytesWritten = file.write(buffer, bytesRead);
-   
-   if (bytesWritten != bytesRead) {
-     Debug::error("CommunicationManager", "Failed to write all bytes: " + 
-                 String(bytesWritten) + " of " + String(bytesRead));
-     file.close();
-     cancelFileTransfer("Write error");
-     return false;
-   }
-   
-   // Update transfer state
-   fileTransfer.bytesTransferred += bytesWritten;
-   fileTransfer.lastUpdate = millis();
-   
-   // Send progress update every PROGRESS_UPDATE_INTERVAL milliseconds
-   if (millis() - fileTransfer.lastUpdate >= PROGRESS_UPDATE_INTERVAL) {
-     int progress = (fileTransfer.bytesTransferred * 100) / fileTransfer.fileSize;
-     sendMessage("Progress: " + String(progress) + "%");
-   }
-   
-   // Check if transfer is complete
-   if (fileTransfer.bytesTransferred >= fileTransfer.fileSize) {
-     file.close();
-     
-     // Send completion message
-     sendMessage(FILE_END_SEQUENCE);
-     sendMessage("File receive completed: " + fileTransfer.filename);
-     
-     Debug::info("CommunicationManager", "File receive completed: " + fileTransfer.filename);
-     
-     // Reset file transfer state
-     fileTransfer.mode = TRANSFER_IDLE;
-   } else {
-     file.close();
-   }
-   
-   return true;
- }
+  // Extended debugging for file receive process
+  if (fileTransfer.mode != TRANSFER_RECEIVING) {
+    Debug::error("CommunicationManager", "File Receive: Not in receive mode");
+    return false;
+  }
+
+  // Log current transfer state
+  Debug::verbose("CommunicationManager", 
+    "File Receive Status - File: " + fileTransfer.filename + 
+    ", Size: " + String(fileTransfer.fileSize) + 
+    ", Transferred: " + String(fileTransfer.bytesTransferred) + 
+    ", Available: " + String(Serial.available())
+  );
+
+  // Check for transfer timeout
+  unsigned long currentTime = millis();
+  if (currentTime - fileTransfer.lastUpdate > FILE_TRANSFER_TIMEOUT) {
+    Debug::error("CommunicationManager", 
+      "File Receive Timeout - Transferred " + 
+      String(fileTransfer.bytesTransferred) + 
+      " of " + String(fileTransfer.fileSize) + " bytes"
+    );
+    cancelFileTransfer("Transfer timeout");
+    return false;
+  }
+
+  // Check if we have data to read
+  if (Serial.available() <= 0) {
+    return true;
+  }
+  
+  // Open the file for writing 
+  File file = SPIFFS.open(fileTransfer.filename, "a");
+  if (!file) {
+    Debug::error("CommunicationManager", 
+      "Failed to open file for writing: " + fileTransfer.filename);
+    cancelFileTransfer("File open error");
+    return false;
+  }
+  
+  // Read data in chunks and write to file
+  const size_t bufferSize = 512;
+  uint8_t buffer[bufferSize];
+  size_t bytesAvailable = Serial.available();
+  size_t bytesToRead = min(bytesAvailable, 
+    min(bufferSize, fileTransfer.fileSize - fileTransfer.bytesTransferred));
+  
+  size_t bytesRead = Serial.readBytes(buffer, bytesToRead);
+  
+  // Debug read operation
+  Debug::verbose("CommunicationManager", 
+    "File Receive - Reading " + String(bytesRead) + 
+    " bytes (available: " + String(bytesAvailable) + ")"
+  );
+
+  size_t bytesWritten = file.write(buffer, bytesRead);
+  
+  if (bytesWritten != bytesRead) {
+    Debug::error("CommunicationManager", 
+      "Failed to write bytes: " + String(bytesWritten) + 
+      " of " + String(bytesRead)
+    );
+    file.close();
+    cancelFileTransfer("Write error");
+    return false;
+  }
+  
+  // Update transfer state
+  fileTransfer.bytesTransferred += bytesWritten;
+  fileTransfer.lastUpdate = currentTime;
+  
+  // Always send progress for debugging
+  int progress = (fileTransfer.bytesTransferred * 100) / fileTransfer.fileSize;
+  sendMessage("Progress: " + String(progress) + "% (" + 
+    String(fileTransfer.bytesTransferred) + "/" + 
+    String(fileTransfer.fileSize) + " bytes)");
+  
+  // Check if transfer is complete
+  if (fileTransfer.bytesTransferred >= fileTransfer.fileSize) {
+    file.close();
+    
+    // Send completion message with verification
+    sendMessage(FILE_END_SEQUENCE);
+    sendMessage("File receive completed: " + fileTransfer.filename + 
+                " (Verified " + String(fileTransfer.bytesTransferred) + " bytes)");
+    
+    Debug::info("CommunicationManager", 
+      "File receive fully completed: " + fileTransfer.filename + 
+      " (" + String(fileTransfer.bytesTransferred) + " bytes)"
+    );
+    
+    // Reset file transfer state
+    fileTransfer.mode = TRANSFER_IDLE;
+  } else {
+    file.close();
+  }
+  
+  return true;
+}
  
  bool CommunicationManager::handleFileSendData() {
    // Make sure we're in send mode
