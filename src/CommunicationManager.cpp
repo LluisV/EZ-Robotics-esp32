@@ -46,52 +46,73 @@
  }
  
  bool CommunicationManager::update() {
-   // Check for serial data
-   while (Serial.available() > 0) {
-    char c = Serial.read();
-     
-     // Check if we're in file receive mode
-     if (fileTransfer.mode == TRANSFER_RECEIVING) {
-       return handleFileReceiveData();
-     }
-     
-     // Normal command processing
-     if (c == '\n' || c == '\r') {
-       // End of line detected
-       if (lineBufferIndex > 0) {
-         // Null terminate the string
-         lineBuffer[lineBufferIndex] = '\0';
-         
-         // Process the line
-         String line = String(lineBuffer);
-         processLine(line);
-         
-         // Reset buffer for next line
-         resetLineBuffer();
-       }
-     } else if (lineBufferIndex < MAX_LINE_LENGTH - 1) {
-       // Add character to buffer
-       lineBuffer[lineBufferIndex++] = c;
-     } else {
-       // Line too long, discard and reset
-       Debug::warning("CommunicationManager", "Line too long, discarding");
-       resetLineBuffer();
-     }
-   }
-   
-   // Check if we should send a file
-   if (fileTransfer.mode == TRANSFER_SENDING) {
-     return handleFileSendData();
-   }
-   
-   // Check for file transfer timeout
-   if (fileTransfer.mode != TRANSFER_IDLE && checkFileTransferTimeout()) {
-     cancelFileTransfer("Timeout");
-     return false;
-   }
-   
-   return true;
- }
+  try {
+    // Check for serial data
+    while (Serial.available() > 0) {
+      char c = Serial.read();
+       
+      // Check if we're in file receive mode
+      if (fileTransfer.mode == TRANSFER_RECEIVING) {
+        return handleFileReceiveData();
+      }
+      
+      // Normal command processing
+      if (c == '\n' || c == '\r') {
+        // End of line detected
+        if (lineBufferIndex > 0) {
+          // Null terminate the string
+          lineBuffer[lineBufferIndex] = '\0';
+          
+          // Process the line
+          String line = String(lineBuffer);
+          
+          // Add try-catch for command processing
+          try {
+            processLine(line);
+          } catch (const std::exception& e) {
+            Debug::error("CommunicationManager", "Exception in processLine: " + String(e.what()));
+            sendMessage("Error: Command processing failed - " + String(e.what()));
+          } catch (...) {
+            Debug::error("CommunicationManager", "Unknown exception in processLine");
+            sendMessage("Error: Command processing failed - Unknown exception");
+          }
+          
+          // Reset buffer for next line
+          resetLineBuffer();
+        }
+      } else if (lineBufferIndex < MAX_LINE_LENGTH - 1) {
+        // Add character to buffer
+        lineBuffer[lineBufferIndex++] = c;
+      } else {
+        // Line too long, discard and reset
+        Debug::warning("CommunicationManager", "Line too long, discarding");
+        sendMessage("Error: Command too long (max " + String(MAX_LINE_LENGTH) + " chars)");
+        resetLineBuffer();
+      }
+    }
+    
+    // Check if we should send a file
+    if (fileTransfer.mode == TRANSFER_SENDING) {
+      return handleFileSendData();
+    }
+    
+    // Check for file transfer timeout
+    if (fileTransfer.mode != TRANSFER_IDLE && checkFileTransferTimeout()) {
+      cancelFileTransfer("Timeout");
+      return false;
+    }
+    
+    return true;
+  } catch (const std::exception& e) {
+    Debug::error("CommunicationManager", "Exception in update: " + String(e.what()));
+    sendMessage("Error: Communication failure - " + String(e.what()));
+    return false;
+  } catch (...) {
+    Debug::error("CommunicationManager", "Unknown exception in update");
+    sendMessage("Error: Communication failure - Unknown exception");
+    return false;
+  }
+}
  
  void CommunicationManager::sendMessage(const String& message) {
    Serial.println(message);
@@ -450,32 +471,81 @@
      return true;
    }
    else if (fileCmd == "RUN") {
-     // Run a G-code file
-     if (!fileManager || !jobManager) {
-       sendMessage("Error: File or job manager not available");
-       return true;
-     }
-     
-     params.trim();
-     if (params.length() == 0) {
-       sendMessage("Error: No filename specified");
-       return true;
-     }
-     
-     // Make sure filename starts with /
-     if (!params.startsWith("/")) {
-       params = "/" + params;
-     }
-     
-     // Start job
-     if (jobManager->startJob(params)) {
-       sendMessage("Job started: " + params);
-     } else {
-       sendMessage("Error starting job: " + params);
-     }
-     
-     return true;
-   }
+    // Run a G-code file
+    if (!fileManager || !jobManager) {
+      sendMessage("Error: File or job manager not available");
+      return true;
+    }
+    
+    params.trim();
+    if (params.length() == 0) {
+      sendMessage("Error: No filename specified");
+      return true;
+    }
+    
+    // Make sure filename starts with /
+    if (!params.startsWith("/")) {
+      params = "/" + params;
+    }
+    
+    // First validate the G-code file
+    GCodeValidator* validator = jobManager->getGCodeValidator();
+    if (validator) {
+      Debug::info("CommunicationManager", "Validating G-code file: " + params);
+      ValidationResult result = jobManager->validateGCodeFile(params);
+      
+      if (!result.valid) {
+        // Report validation errors
+        Debug::error("CommunicationManager", "G-code validation failed for: " + params);
+        sendMessage("G-code validation failed. Job not started.");
+        sendMessage("Found " + String(result.errors.size()) + " errors in file.");
+        
+        // Send the formatted validation errors
+        if (validator) {
+          String errorReport = validator->formatValidationErrors(result);
+          sendMessage(errorReport);
+        } else {
+          // Send basic error information
+          int errorLimit = min(5, (int)result.errors.size());
+          for (int i = 0; i < errorLimit; i++) {
+            const GCodeError& error = result.errors[i];
+            sendMessage("Line " + String(error.lineNumber) + ": " + error.line);
+            sendMessage("  Error: " + error.errorDescription);
+          }
+          
+          if (result.errors.size() > errorLimit) {
+            sendMessage("... and " + String(result.errors.size() - errorLimit) + " more errors.");
+          }
+        }
+        
+        return true;
+      }
+      
+      Debug::info("CommunicationManager", "G-code validation passed for: " + params);
+      sendMessage("G-code validation passed. Starting job.");
+    } else {
+      Debug::warning("CommunicationManager", "G-code validator not available. Proceeding without validation.");
+    }
+    
+    // Add debug information to understand current state
+    Debug::info("CommunicationManager", "Current job status: " + String(jobManager->getJobStatus()));
+    Debug::info("CommunicationManager", "Command queue size: " + String(commandQueue->size()));
+
+    // Forcibly reset job state if needed
+    if (!jobManager->canStartNewJob()) {
+      Debug::warning("CommunicationManager", "Forcing job manager reset before starting new job");
+      jobManager->stopJob(); // Force reset the job state
+    }
+
+    // Then attempt to start the job
+    if (jobManager->startJob(params)) {
+      sendMessage("Job started: " + params);
+    } else {
+      sendMessage("Error starting job: " + params);
+    }
+    
+    return true;
+  }
    else if (fileCmd == "PAUSE") {
      // Pause current job
      if (!jobManager) {

@@ -74,6 +74,30 @@
     * @return True if successful, false otherwise
     */
    bool executeMCode(int code, const std::map<char, float>& params);
+
+   /**
+   * @brief Validate a G-code line without executing it
+   * @param command G-code command string
+   * @param errorMessage Output parameter for error message if invalid
+   * @return True if valid, false otherwise
+   */
+  bool validate(const String& command, String& errorMessage);
+
+  /**
+   * @brief Check if a G-code is supported
+   * @param code G-code number
+   * @return True if supported, false otherwise
+   */
+  bool isGCodeSupported(int code) const;
+
+  /**
+   * @brief Check if an M-code is supported
+   * @param code M-code number
+   * @return True if supported, false otherwise
+   */
+  bool isMCodeSupported(int code) const;
+
+
  };
  
  #endif // GCODE_PARSER_H

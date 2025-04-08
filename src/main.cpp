@@ -14,7 +14,8 @@
  #include "FileManager.h"
  #include "JobManager.h"
  #include "CommunicationManager.h"
- 
+ #include "GCodeValidator.h"
+
  // Debug configuration
  #define DEBUG_ENABLED true
  #define DEBUG_LEVEL DEBUG_WARNING
@@ -36,51 +37,80 @@
  FileManager* fileManager = NULL;
  JobManager* jobManager = NULL;
  CommunicationManager* communicationManager = NULL;
+ GCodeValidator* gCodeValidator = NULL;
  
  /**
   * @brief Communication task that runs on Core 0
   * Handles serial communication, file operations, and command preprocessing
   */
  void communicationTask(void *parameter) {
-   Debug::info("CommunicationTask", "Task started on Core " + String(xPortGetCoreID()));
-   
-   // Wait for system initialization
-   delay(500);
-   
-   unsigned long lastTelemetryTime = 0;
-   unsigned long telemetryInterval = 100; // Default to 10 Hz, will be updated by config
-   
-   // Get telemetry settings from configuration
-   if (communicationManager && communicationManager->getTelemetryFrequency() > 0) {
-     telemetryInterval = 1000 / communicationManager->getTelemetryFrequency();
-   }
+  Debug::info("CommunicationTask", "Task started on Core " + String(xPortGetCoreID()));
+  
+  // Wait for system initialization
+  delay(500);
+  
+  unsigned long lastTelemetryTime = 0;
+  unsigned long telemetryInterval = 100; // Default to 10 Hz, will be updated by config
+  
+  // Get telemetry settings from configuration
+  if (communicationManager && communicationManager->getTelemetryFrequency() > 0) {
+    telemetryInterval = 1000 / communicationManager->getTelemetryFrequency();
+  }
 
-   while (true) {
-     // Update communication manager
-     if (communicationManager) {
-       communicationManager->update();
-     }
-     
-     // Update job manager
-     if (jobManager) {
-       jobManager->update();
-     }
-     
-     // Periodic telemetry updates
-     unsigned long currentTime = millis();
-     if (communicationManager) {
-      // Check if it's time for a telemetry update
-      if (currentTime - lastTelemetryTime >= telemetryInterval) {
-        communicationManager->sendPositionTelemetry(false);
-        // Update last telemetry time
-        lastTelemetryTime = currentTime;
+  while (true) {
+    try {
+      // Update communication manager
+      if (communicationManager) {
+        communicationManager->update();
+      }
+      
+      // Update job manager
+      if (jobManager) {
+        jobManager->update();
+      }
+      
+      // Periodic telemetry updates
+      unsigned long currentTime = millis();
+      if (communicationManager) {
+        // Check if it's time for a telemetry update
+        if (currentTime - lastTelemetryTime >= telemetryInterval) {
+          communicationManager->sendPositionTelemetry(false);
+          // Update last telemetry time
+          lastTelemetryTime = currentTime;
+        }
+      }
+    } catch (const std::exception& e) {
+      // Log the error
+      Debug::error("CommunicationTask", "Exception caught: " + String(e.what()));
+      
+      // Report the error
+      if (communicationManager) {
+        communicationManager->sendMessage("System error: " + String(e.what()));
+      }
+      
+      // Emergency abort any running job
+      if (jobManager) {
+        jobManager->emergencyAbortJob("Communication task exception: " + String(e.what()));
+      }
+    } catch (...) {
+      // Log the unknown error
+      Debug::error("CommunicationTask", "Unknown exception caught");
+      
+      // Report the error
+      if (communicationManager) {
+        communicationManager->sendMessage("System error: Unknown exception");
+      }
+      
+      // Emergency abort any running job
+      if (jobManager) {
+        jobManager->emergencyAbortJob("Communication task unknown exception");
       }
     }
-     
-     // Let the CPU breathe
-     vTaskDelay(1);
-   }
- }
+    
+    // Let the CPU breathe
+    vTaskDelay(1);
+  }
+}
  
  /**
   * @brief Motion control task that runs on Core 1
@@ -88,37 +118,88 @@
   * This task only processes commands from the queue and has no direct communication with serial
   */
  void motionTask(void *parameter) {
-   Debug::info("MotionTask", "Task started on Core " + String(xPortGetCoreID()));
-   
-   while (true) {
-     // Process commands from queue
-     if (machineController && gCodeParser && commandQueue && !commandQueue->isEmpty()) {
-       // First check for immediate commands (already placed in the queue by CommunicationManager)
-       String immediateCmd = commandQueue->getNextImmediate();
-       if (immediateCmd.length() > 0) {
-         Debug::info("MotionTask", "Processing immediate command: " + immediateCmd);
-         
-         // Process immediate command - all interpretation should be done here
-         // Emergency stop commands are already properly formatted as M112 by CommunicationManager
-         gCodeParser->parse(immediateCmd);
-       }
-       // Then process regular commands if not busy with immediate commands
-       else {
-         String command = commandQueue->pop();
-         Debug::verbose("MotionTask", "Processing command from queue: " + command);
-         
-         // Parse as G-code
-         gCodeParser->parse(command);
-       }
-     }
-     
-     // Update motor states
-     motorManager.update();
-     
-     // Let the CPU breathe
-     vTaskDelay(1);
-   }
- }
+  Debug::info("MotionTask", "Task started on Core " + String(xPortGetCoreID()));
+  
+  while (true) {
+    try {
+      // Process commands from queue
+      if (machineController && gCodeParser && commandQueue && !commandQueue->isEmpty()) {
+        // First check for immediate commands (already placed in the queue by CommunicationManager)
+        String immediateCmd = commandQueue->getNextImmediate();
+        if (immediateCmd.length() > 0) {
+          Debug::info("MotionTask", "Processing immediate command: " + immediateCmd);
+          
+          // Process immediate command - all interpretation should be done here
+          // Emergency stop commands are already properly formatted as M112 by CommunicationManager
+          if (!gCodeParser->parse(immediateCmd)) {
+            Debug::error("MotionTask", "Failed to execute immediate command: " + immediateCmd);
+            
+            // For immediate commands, we might want to take drastic action
+            if (immediateCmd.startsWith("M112") || immediateCmd.startsWith("STOP")) {
+              // For emergency stop, still try to stop everything
+              machineController->emergencyStop();
+            }
+          }
+        }
+        // Then process regular commands if not busy with immediate commands
+        else {
+          String command = commandQueue->pop();
+          Debug::verbose("MotionTask", "Processing command from queue: " + command);
+          
+          // Parse as G-code
+          if (!gCodeParser->parse(command)) {
+            Debug::error("MotionTask", "Failed to execute command: " + command);
+            
+            // If this is part of a job, we might want to handle it specially
+            if (jobManager && jobManager->isJobRunning()) {
+              Debug::warning("MotionTask", "Command failed during job execution");
+              // We could abort the job here, but it might be better to continue
+              // and let the operator decide whether to stop
+            }
+          }
+        }
+      }
+      
+      // Update motor states
+      motorManager.update();
+    } catch (const std::exception& e) {
+      // Log the error
+      Debug::error("MotionTask", "Exception caught: " + String(e.what()));
+      
+      // Report the error (indirectly, as motion task can't access serial directly)
+      if (commandQueue) {
+        // Enqueue an error message (as an immediate command with special format)
+        commandQueue->push("!ERROR:" + String(e.what()), IMMEDIATE);
+      }
+      
+      // Emergency stop all motion
+      if (machineController) {
+        machineController->emergencyStop();
+      }
+      
+      // Abort any running job
+      if (jobManager) {
+        jobManager->emergencyAbortJob("Motion task exception: " + String(e.what()));
+      }
+    } catch (...) {
+      // Log the unknown error
+      Debug::error("MotionTask", "Unknown exception caught");
+      
+      // Emergency stop all motion
+      if (machineController) {
+        machineController->emergencyStop();
+      }
+      
+      // Abort any running job
+      if (jobManager) {
+        jobManager->emergencyAbortJob("Motion task unknown exception");
+      }
+    }
+    
+    // Let the CPU breathe
+    vTaskDelay(1);
+  }
+}
  
  void setup() {
    // Initialize serial communication
@@ -219,12 +300,31 @@
    }
    
    // 8. Initialize JobManager
+  
    Debug::info("Main", "Creating JobManager");
    jobManager = new JobManager(commandQueue, fileManager);
    if (!jobManager) {
      Debug::error("Main", "Failed to create JobManager");
      Serial.println("Failed to create job manager!");
-   }
+    }
+    // Initialize GCodeValidator
+    Debug::info("Main", "Creating GCodeValidator");
+    gCodeValidator = new GCodeValidator(fileManager, gCodeParser);
+    if (!gCodeValidator) {
+      Debug::error("Main", "Failed to create GCodeValidator");
+      Serial.println("Failed to create G-code validator!");
+    } else {
+      // Connect validator to JobManager
+      if (jobManager) {
+        jobManager->setGCodeValidator(gCodeValidator);
+        Debug::info("Main", "GCodeValidator connected to JobManager");
+      }
+    }
+    // Connect CommandProcessor to JobManager
+    if (jobManager && commandProcessor) {
+      Debug::info("Main", "Connecting CommandProcessor to JobManager");
+      jobManager->setCommandProcessor(commandProcessor);
+    }
    
    // 9. Initialize CommunicationManager
    Debug::info("Main", "Creating CommunicationManager");

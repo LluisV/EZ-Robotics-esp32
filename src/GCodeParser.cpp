@@ -36,20 +36,29 @@ bool GCodeParser::parse(const String& command) {
     Debug::verbose("GCodeParser", "Removed inline comment. Trimmed command: " + trimmedCmd);
   }
 
+  // Validate the command first
+  String errorMessage;
+  if (!validate(trimmedCmd, errorMessage)) {
+    Debug::error("GCodeParser", "Command validation failed: " + errorMessage);
+    Serial.println("Error: " + errorMessage);
+    return false;
+  }
+
   // Extract G/M code
   char codeType;
   int code = extractCode(trimmedCmd, codeType);
   
-  if (code < 0) {
-    Debug::error("GCodeParser", "Invalid G-code format: " + command);
-    Serial.println("Invalid G-code format: " + command);
-    return false;
-  }
-  
   Debug::verbose("GCodeParser", "Extracted code: " + String(codeType) + String(code));
   
   // Parse parameters
-  std::map<char, float> params = parseParameters(trimmedCmd);
+  std::map<char, float> params;
+  try {
+    params = parseParameters(trimmedCmd);
+  } catch (const std::exception& e) {
+    Debug::error("GCodeParser", "Parameter parsing error: " + String(e.what()));
+    Serial.println("Error: Parameter parsing failed - " + String(e.what()));
+    return false;
+  }
   
   // Log parsed parameters
   Debug::verbose("GCodeParser", "Parsed parameters count: " + String(params.size()));
@@ -74,6 +83,11 @@ bool GCodeParser::parse(const String& command) {
     }
   } catch (const std::exception& e) {
     Debug::error("GCodeParser", "Exception during command execution: " + String(e.what()));
+    Serial.println("Error executing command: " + String(e.what()));
+    result = false;
+  } catch (...) {
+    Debug::error("GCodeParser", "Unknown exception during command execution");
+    Serial.println("Unknown error executing command");
     result = false;
   }
   
@@ -84,6 +98,9 @@ bool GCodeParser::parse(const String& command) {
     Debug::verbose("GCodeParser", "Command executed successfully");
   }
   
+  if(result)
+    Debug::info("GCodeParser", "Executing: " + command);
+    
   return result;
 }
  
@@ -349,3 +366,114 @@ int GCodeParser::extractCode(const String& command, char& codeType) {
        return false;
    }
  }
+
+ bool GCodeParser::validate(const String& command, String& errorMessage) {
+  errorMessage = "";
+  
+  // Ignore empty lines and comments
+  String trimmedCmd = command;
+  trimmedCmd.trim();
+  
+  if (trimmedCmd.length() == 0 || trimmedCmd.startsWith(";")) {
+    return true; // Empty lines and comments are valid
+  }
+  
+  // Remove inline comments
+  int commentIdx = trimmedCmd.indexOf(';');
+  if (commentIdx >= 0) {
+    trimmedCmd = trimmedCmd.substring(0, commentIdx);
+    trimmedCmd.trim();
+  }
+
+  // Extract G/M code
+  char codeType;
+  int code = extractCode(trimmedCmd, codeType);
+  
+  if (code < 0) {
+    errorMessage = "Invalid G-code format: " + command;
+    return false;
+  }
+  
+  // Parse parameters
+  std::map<char, float> params;
+  try {
+    params = parseParameters(trimmedCmd);
+  } catch (const std::exception& e) {
+    errorMessage = "Parameter parsing error: " + String(e.what());
+    return false;
+  }
+  
+  // Validate based on code type
+  if (codeType == 'G') {
+    if (!isGCodeSupported(code)) {
+      errorMessage = "Unsupported G-code: G" + String(code);
+      return false;
+    }
+    
+    // Validate specific G-codes
+    switch (code) {
+      case 0: // G0: Rapid move
+      case 1: // G1: Linear move
+        // At least one axis should be specified
+        if (params.find('X') == params.end() && 
+            params.find('Y') == params.end() && 
+            params.find('Z') == params.end()) {
+          errorMessage = "G" + String(code) + " requires at least one axis (X, Y, Z)";
+          return false;
+        }
+        break;
+        
+      case 28: // G28: Home
+        // No validation needed for G28
+        break;
+        
+      case 92: // G92: Set position
+        // At least one axis should be specified
+        if (params.find('X') == params.end() && 
+            params.find('Y') == params.end() && 
+            params.find('Z') == params.end()) {
+          errorMessage = "G92 requires at least one axis (X, Y, Z)";
+          return false;
+        }
+        break;
+    }
+  } else if (codeType == 'M') {
+    if (!isMCodeSupported(code)) {
+      errorMessage = "Unsupported M-code: M" + String(code);
+      return false;
+    }
+  } else {
+    errorMessage = "Unsupported code type: " + String(codeType);
+    return false;
+  }
+  
+  return true;
+}
+
+bool GCodeParser::isGCodeSupported(int code) const {
+  // List of supported G-codes
+  static const int supportedCodes[] = {0, 1, 4, 20, 21, 28, 90, 91, 92};
+  static const int numCodes = sizeof(supportedCodes) / sizeof(supportedCodes[0]);
+  
+  for (int i = 0; i < numCodes; i++) {
+    if (code == supportedCodes[i]) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+bool GCodeParser::isMCodeSupported(int code) const {
+  // List of supported M-codes
+  static const int supportedCodes[] = {0, 1, 2, 3, 4, 5, 30, 112};
+  static const int numCodes = sizeof(supportedCodes) / sizeof(supportedCodes[0]);
+  
+  for (int i = 0; i < numCodes; i++) {
+    if (code == supportedCodes[i]) {
+      return true;
+    }
+  }
+  
+  return false;
+}

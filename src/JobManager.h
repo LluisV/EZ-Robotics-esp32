@@ -10,7 +10,9 @@
  #include "CommandQueue.h"
  #include "FileManager.h"
  #include "Debug.h"
- 
+ #include "GCodeValidator.h"
+ #include "CommandProcessor.h"
+
  // Forward declarations
  class FileManager;
  
@@ -38,6 +40,14 @@
     */
    JobManager(CommandQueue* commandQueue, FileManager* fileManager);
    
+  /**
+   * @brief Set the G-code validator
+   * @param validator G-code validator reference
+   */
+  void setGCodeValidator(GCodeValidator* validator) {
+    this->gCodeValidator = validator;
+  }
+
    /**
     * @brief Update function to be called regularly
     * @return True if successful, false otherwise
@@ -110,6 +120,44 @@
     * @return True if system is ready for a new job, false otherwise
     */
    bool canStartNewJob() const;
+
+   /**
+   * @brief Validate a G-code file before running
+   * @param filename Name of the G-code file
+   * @return Validation result
+   */
+  ValidationResult validateGCodeFile(const String& filename);
+  
+  /**
+   * @brief Get last validation result
+   * @return Last validation result
+   */
+  ValidationResult getLastValidationResult() const {
+    return lastValidationResult;
+  }
+  
+  /**
+   * @brief Emergency abort current job and reset machine state
+   * @param errorMessage Error message to log
+   */
+  void emergencyAbortJob(const String& errorMessage);
+
+
+  /**
+   * @brief Set the command processor
+   * @param processor Command processor reference
+   */
+  void setCommandProcessor(CommandProcessor* processor) {
+    commandProcessor = processor;
+  }
+  
+   /**
+   * @brief Get the G-code validator
+   * @return Pointer to G-code validator or nullptr
+   */
+    GCodeValidator* getGCodeValidator() const {
+      return gCodeValidator;
+    }
  
  private:
    CommandQueue* commandQueue;   ///< Reference to the command queue
@@ -128,7 +176,16 @@
    
    bool emergencyStopRequested;  ///< Flag for emergency stop
    bool jobCompletionAcknowledged; ///< Flag for job completion acknowledgment
-   
+
+   GCodeValidator* gCodeValidator = nullptr;  ///< G-code validator reference
+   ValidationResult lastValidationResult;     ///< Last validation result
+   CommandProcessor* commandProcessor = nullptr;  ///< Command processor reference
+
+   /**
+   * @brief Reset machine state after an error
+   */
+   void resetMachineState();
+
    /**
     * @brief Count total lines and estimate job size
     * @param filename Name of the G-code file
