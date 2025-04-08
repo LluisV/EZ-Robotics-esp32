@@ -35,7 +35,11 @@
         "acceleration": 8000,
         "homingDirection": -1,
         "backoffDistance": 5.0,
-        "maxTravel": 240.0
+        "minPosition": 0.0,
+        "maxPosition": 240.0,
+        "endstopPosition": 0.0,
+        "homePosition": 0.0,
+        "invertPosition": false
       },
       {
         "name": "Y",
@@ -52,7 +56,11 @@
         "acceleration": 8000,
         "homingDirection": -1,
         "backoffDistance": 5.0,
-        "maxTravel": 350.0
+        "minPosition": 0.0,
+        "maxPosition": 350.0,
+        "endstopPosition": 0.0,
+        "homePosition": 0.0,
+        "invertPosition": false
       },
       {
         "name": "Z",
@@ -69,7 +77,11 @@
         "acceleration": 8000,
         "homingDirection": -1,
         "backoffDistance": 5.0,
-        "maxTravel": 125.0
+        "minPosition": 0.0,
+        "maxPosition": 125.0,
+        "endstopPosition": 125.0,
+        "homePosition": 125.0,
+        "invertPosition": true
       }
     ]
   }
