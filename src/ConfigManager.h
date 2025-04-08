@@ -49,6 +49,10 @@
    float maxFeedrate;      ///< Maximum feedrate in mm/min
    float junctionDeviation; ///< Junction deviation for path planning
    float arcTolerance;     ///< Arc tolerance in mm
+   struct {
+    bool enabled;         ///< Whether telemetry is enabled
+    int updatePositionFrequency;  ///< Telemetry update frequency in Hz
+  } telemetry;
  };
  
  /**

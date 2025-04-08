@@ -577,11 +577,30 @@
   
   size_t bytesRead = Serial.readBytes(buffer, bytesToRead);
   
+  // ------------------- DEBUG, DELETE LATER -----------------------------------------
   // Debug read operation
-  Debug::verbose("CommunicationManager", 
+  Debug::warning("CommunicationManager", 
     "File Receive - Reading " + String(bytesRead) + 
     " bytes (available: " + String(bytesAvailable) + ")"
   );
+
+  // Print raw data as hex
+  String hexStr;
+  for (size_t i = 0; i < bytesRead; ++i) {
+    hexStr += String(buffer[i], HEX) + " ";
+  }
+  Debug::warning("CommunicationManager", 
+    "File Receive - Data (hex): " + hexStr
+  );
+
+  // Now, print the data as a string (if it’s text)
+  char debugBuffer[bufferSize + 1];  // Adding extra space for null terminator
+  memcpy(debugBuffer, buffer, bytesRead);
+  debugBuffer[bytesRead] = '\0';  // Ensure null termination
+  Debug::warning("CommunicationManager", 
+    "File Receive - Data: \"" + String(debugBuffer) + "\""
+  );
+  //--------------------------------------------------------------------------------
 
   size_t bytesWritten = file.write(buffer, bytesRead);
   
@@ -722,3 +741,41 @@
    memset(lineBuffer, 0, MAX_LINE_LENGTH);
    lineBufferIndex = 0;
  }
+
+ void CommunicationManager::sendPositionTelemetry(bool force) {
+  // Skip if telemetry is disabled
+  if (!telemetryEnabled) return;
+
+  // Get current time
+  unsigned long currentTime = millis();
+
+  // Check if it's time to send telemetry
+  unsigned long telemetryInterval = 1000 / telemetryFrequency;
+  if (!force && currentTime - lastTelemetryTime < telemetryInterval) return;
+
+  // Ensure machine controller exists
+  if (!commandProcessor) return;
+  MachineController* machineController = commandProcessor->getMachineController();
+  if (!machineController) return;
+
+  // Get current position
+  std::vector<float> currentPosition = machineController->getCurrentPosition();
+
+  // Only send if position has changed or force is true
+  if (force || 
+      lastReportedPosition.empty() || 
+      currentPosition != lastReportedPosition) {
+    
+    // Format telemetry message
+    String telemetryMsg = "[TELEMETRY][POS] X:" + String(currentPosition[0], 3) + 
+                          " Y:" + String(currentPosition[1], 3) + 
+                          " Z:" + String(currentPosition[2], 3);
+    
+    // Send the message
+    sendMessage(telemetryMsg);
+    
+    // Update tracking variables
+    lastReportedPosition = currentPosition;
+    lastTelemetryTime = currentTime;
+  }
+}

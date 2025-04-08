@@ -119,6 +119,16 @@
     * @return True if command was processed, false otherwise
     */
    bool processFileCommand(const String& command);
+
+      /**
+    * @brief Send machine position telemetry
+    * @param force Force sending telemetry even if no change or machine not moving
+    */
+   void sendPositionTelemetry(bool force = false);
+
+   int getTelemetryFrequency() const {
+    return telemetryFrequency;
+  }
  
  private:
    CommandQueue* commandQueue;             ///< Reference to the command queue
@@ -130,6 +140,11 @@
    int lineBufferIndex;                    ///< Current position in line buffer
    
    FileTransferState fileTransfer;         ///< File transfer state
+
+   unsigned long lastTelemetryTime = 0;    ///< Time of last telemetry update
+   std::vector<float> lastReportedPosition; ///< Last reported position
+   bool telemetryEnabled = true;           ///< Telemetry global enable flag
+   int telemetryFrequency = 10;            ///< Telemetry update frequency in Hz
    
    /**
     * @brief Handle receiving binary data for a file transfer
@@ -153,6 +168,9 @@
     * @brief Reset the line buffer
     */
    void resetLineBuffer();
+   
+
+
  };
  
  #endif // COMMUNICATION_MANAGER_H

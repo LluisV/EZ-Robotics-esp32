@@ -180,6 +180,9 @@
    machineConfig.maxFeedrate = 5000.0;      // 5000 mm/min
    machineConfig.junctionDeviation = 0.01;  // 0.01 mm
    machineConfig.arcTolerance = 0.002;      // 0.002 mm
+
+   machineConfig.telemetry.enabled = true;  // Enable telemetry by default
+   machineConfig.telemetry.updatePositionFrequency = 10;  // 10 Hz update rate
    
    // Setup default X axis
    MotorConfig xConfig;
@@ -319,26 +322,38 @@
  }
  
  bool ConfigManager::parseMachineConfig(const JsonObject& json) {
-   if (json.isNull()) {
-     // Use defaults if no machine config is provided
-     machineConfig.machineName = "Default CNC";
-     machineConfig.defaultFeedrate = 1000.0;
-     machineConfig.maxFeedrate = 5000.0;
-     machineConfig.junctionDeviation = 0.01;
-     machineConfig.arcTolerance = 0.002;
-     return true;
-   }
-   
-   machineConfig.machineName = json["machineName"].is<String>() ? 
-                                json["machineName"].as<String>() : "Default CNC";
-   machineConfig.defaultFeedrate = json["defaultFeedrate"].is<float>() ? 
-                                   json["defaultFeedrate"].as<float>() : 1000.0f;
-   machineConfig.maxFeedrate = json["maxFeedrate"].is<float>() ? 
-                               json["maxFeedrate"].as<float>() : 5000.0f;
-   machineConfig.junctionDeviation = json["junctionDeviation"].is<float>() ? 
-                                     json["junctionDeviation"].as<float>() : 0.01f;
-   machineConfig.arcTolerance = json["arcTolerance"].is<float>() ? 
-                                json["arcTolerance"].as<float>() : 0.002f;
-   
-   return true;
- }
+  if (json.isNull()) {
+    // Use defaults if no machine config is provided
+    machineConfig.machineName = "Default CNC";
+    machineConfig.defaultFeedrate = 1000.0;
+    machineConfig.maxFeedrate = 5000.0;
+    machineConfig.junctionDeviation = 0.01;
+    machineConfig.arcTolerance = 0.002;
+    
+    // Default telemetry configuration
+    machineConfig.telemetry.enabled = true;
+    machineConfig.telemetry.updatePositionFrequency = 10;
+    
+    return true;
+  }
+  
+  machineConfig.machineName = json["machineName"].is<String>() ? 
+                               json["machineName"].as<String>() : "Default CNC";
+  machineConfig.defaultFeedrate = json["defaultFeedrate"].is<float>() ? 
+                                  json["defaultFeedrate"].as<float>() : 1000.0f;
+  machineConfig.maxFeedrate = json["maxFeedrate"].is<float>() ? 
+                              json["maxFeedrate"].as<float>() : 5000.0f;
+  machineConfig.junctionDeviation = json["junctionDeviation"].is<float>() ? 
+                                    json["junctionDeviation"].as<float>() : 0.01f;
+  machineConfig.arcTolerance = json["arcTolerance"].is<float>() ? 
+                               json["arcTolerance"].as<float>() : 0.002f;
+  
+  // Parse telemetry configuration
+  JsonObject telemetryJson = json["telemetry"].as<JsonObject>();
+  machineConfig.telemetry.enabled = telemetryJson["enabled"].is<bool>() ? 
+                                    telemetryJson["enabled"].as<bool>() : true;
+  machineConfig.telemetry.updatePositionFrequency = telemetryJson["updateFrequency"].is<int>() ? 
+                                            telemetryJson["updateFrequency"].as<int>() : 10;
+  
+  return true;
+}

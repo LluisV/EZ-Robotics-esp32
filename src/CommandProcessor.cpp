@@ -32,37 +32,34 @@
    Debug::verbose("CommandProcessor", "Cleaned command: " + cleanCmd);
    
    if (cleanCmd.startsWith("POS")) {
-     // Report current position
-     Debug::timerStart("CommandProcessor", "GetPosition");
-     std::vector<float> positions = machineController->getCurrentPosition();
-     Debug::timerEnd("CommandProcessor", "GetPosition");
-     
-     String posStr = "Position:";
-     
-     for (size_t i = 0; i < positions.size(); i++) {
-       Motor* motor = machineController->getMotorManager()->getMotor(i);
-       if (motor) {
-         posStr += " " + motor->getName() + ":" + String(positions[i], 3);
-       }
-     }
-     
-     Debug::info("CommandProcessor", "Position report: " + posStr);
-     return posStr;
+    Debug::timerStart("CommandProcessor", "GetPosition");
+    std::vector<float> positions = machineController->getCurrentPosition();
+    Debug::timerEnd("CommandProcessor", "GetPosition");
+    
+    String posStr = "";
+    
+    for (size_t i = 0; i < positions.size(); i++) {
+      Motor* motor = machineController->getMotorManager()->getMotor(i);
+      if (motor) {
+        posStr += " " + motor->getName() + ":" + String(positions[i], 3);
+      }
+    }
+    
+    return "<RESPONSE:POS> " + posStr;
    } 
    else if (cleanCmd.startsWith("STATUS")) {
      // Report machine status
-     String status = "Status: ";
+     String status = "";
      status += machineController->isMoving() ? "MOVING" : "IDLE";
      
      // Add more status information as needed
      status += " | Absolute mode: " + String(machineController->isAbsoluteMode() ? "ON" : "OFF");
      
-     Debug::info("CommandProcessor", "Status report: " + status);
-     return status;
+     return "<RESPONSE:STATUS>" + status;
    }
    else if (cleanCmd.startsWith("ENDSTOPS")) {
      // Report endstop status for all motors
-     String endstopStatus = "Endstop Status:";
+     String endstopStatus = "";
      
      MotorManager* motorManager = machineController->getMotorManager();
      for (int i = 0; i < motorManager->getNumMotors(); i++) {
@@ -79,7 +76,7 @@
      }
      
      Debug::info("CommandProcessor", "Endstop report: " + endstopStatus);
-     return endstopStatus;
+     return "<RESPONSE:ENDSTOPS>" + endstopStatus;
    }
    else if (cleanCmd.startsWith("HELP")) {
      // Show available commands
@@ -104,43 +101,43 @@
      helpText += "  @RESUME - Resume current job\n";
      helpText += "  @STOP - Stop current job\n";
      
-     return helpText;
+     return "<RESPONSE:HELP>" + helpText;
    }
    else if (cleanCmd.startsWith("DEBUG")) {
      // Process debug commands
      if (cleanCmd == "DEBUG ON") {
        Debug::begin(true);
        Debug::info("CommandProcessor", "Debug enabled via command");
-       return "Debug mode enabled";
+       return "<RESPONSE:DEBUG_MODE_CHANGE> Debug mode enabled";
      }
      else if (cleanCmd == "DEBUG OFF") {
        Debug::info("CommandProcessor", "Debug disabled via command");
        Debug::begin(false);
-       return "Debug mode disabled";
+       return "<RESPONSE:DEBUG_MODE_CHANGE> Debug mode disabled";
      }
      else if (cleanCmd.startsWith("DEBUG LEVEL")) {
        // Set debug level
        int level = cleanCmd.substring(11).toInt();
        level = constrain(level, 0, 3);
        Debug::setLevel(level);
-       return "Debug level set to " + String(level);
+       return "<RESPONSE:DEBUG_MODE_CHANGE> Debug level set to " + String(level);
      }
      else if (cleanCmd == "DEBUG DIAG") {
        Debug::printDiagnostics();
-       return "Diagnostics printed to debug output";
+       return "<RESPONSE:DEBUG_MODE_CHANGE> Diagnostics printed to debug output";
      }
    }
    else if (cleanCmd.startsWith("CONFIG")) {
      // Report current machine configuration
      if (!machineController) {
        Debug::error("CommandProcessor", "Machine controller not available for config report");
-       return "Error: Machine controller not available";
+       return "<RESPONSE:DEBUG_MODE_CHANGE> Error: Machine controller not available";
      }
    
      ConfigManager* configManager = machineController->getConfigManager();
      if (!configManager) {
        Debug::error("CommandProcessor", "Config manager not available");
-       return "Error: Config manager not available";
+       return "<RESPONSE:DEBUG_MODE_CHANGE> Error: Config manager not available";
      }
    
      // Get machine configuration
@@ -173,11 +170,11 @@
      }
      
      Debug::info("CommandProcessor", "Configuration report requested");
-     return configStr;
+     return "<RESPONSE:DEBUG_MODE_CHANGE>" + configStr;
    }
    
    Debug::warning("CommandProcessor", "Unknown info command: " + command);
-   return "Unknown info command: " + command;
+   return "<RESPONSE:DEBUG_MODE_CHANGE> Unknown info command: " + command;
  }
  
  bool CommandProcessor::processImmediateCommand(const String& command) {

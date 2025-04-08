@@ -7,7 +7,7 @@
 
  // Initialize static members
  bool Debug::enabled = false;
- uint8_t Debug::debugLevel = 2;
+ uint8_t Debug::debugLevel = 1;
  Debug::Timer Debug::timers[MAX_TIMERS];
  int Debug::timerCount = 0;
  

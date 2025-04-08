@@ -17,7 +17,7 @@
  
  // Debug configuration
  #define DEBUG_ENABLED true
- #define DEBUG_LEVEL DEBUG_VERBOSE
+ #define DEBUG_LEVEL DEBUG_WARNING
  
  // Task handles for dual-core operation
  TaskHandle_t commTaskHandle = NULL;
@@ -47,9 +47,14 @@
    // Wait for system initialization
    delay(500);
    
-   unsigned long lastStatusTime = 0;
-   const unsigned long STATUS_INTERVAL = 1000; // Send status update every second
+   unsigned long lastTelemetryTime = 0;
+   unsigned long telemetryInterval = 100; // Default to 10 Hz, will be updated by config
    
+   // Get telemetry settings from configuration
+   if (communicationManager && communicationManager->getTelemetryFrequency() > 0) {
+     telemetryInterval = 1000 / communicationManager->getTelemetryFrequency();
+   }
+
    while (true) {
      // Update communication manager
      if (communicationManager) {
@@ -61,16 +66,16 @@
        jobManager->update();
      }
      
-     // Periodic status updates
+     // Periodic telemetry updates
      unsigned long currentTime = millis();
-     if (currentTime - lastStatusTime >= STATUS_INTERVAL) {
-       lastStatusTime = currentTime;
-       
-       if (communicationManager && machineController && machineController->isMoving()) {
-         // Send brief status update when machine is moving
-         communicationManager->sendStatusUpdate(false);
-       }
-     }
+     if (communicationManager) {
+      // Check if it's time for a telemetry update
+      if (currentTime - lastTelemetryTime >= telemetryInterval) {
+        communicationManager->sendPositionTelemetry(false);
+        // Update last telemetry time
+        lastTelemetryTime = currentTime;
+      }
+    }
      
      // Let the CPU breathe
      vTaskDelay(1);
