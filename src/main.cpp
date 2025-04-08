@@ -120,10 +120,28 @@
  void motionTask(void *parameter) {
   Debug::info("MotionTask", "Task started on Core " + String(xPortGetCoreID()));
   
+  // Flag to track if we're waiting for motion completion
+  bool waitingForMotionComplete = false;
+  String pendingCommand = "";
+  
   while (true) {
     try {
-      // Process commands from queue
-      if (machineController && gCodeParser && commandQueue && !commandQueue->isEmpty()) {
+      // MOTION SYNC: First check if we're waiting for motion to complete
+      if (waitingForMotionComplete) {
+        if (!machineController || !machineController->isMoving()) {
+          // Motion is complete, we can clear the waiting flag
+          waitingForMotionComplete = false;
+          Debug::verbose("MotionTask", "Previous motion completed, ready for next command");
+        } else {
+          // Still moving, don't process new movement commands yet
+          // Check again after a short delay
+          vTaskDelay(5);
+          continue;
+        }
+      }
+      
+      // Process commands from queue when not waiting for motion to complete
+      if (machineController && gCodeParser && commandQueue && !commandQueue->isEmpty() && !waitingForMotionComplete) {
         // First check for immediate commands (already placed in the queue by CommunicationManager)
         String immediateCmd = commandQueue->getNextImmediate();
         if (immediateCmd.length() > 0) {
@@ -140,11 +158,17 @@
               machineController->emergencyStop();
             }
           }
+          
+          // For emergency commands, we don't want to wait for motion completion
+          // as they should interrupt the current motion
         }
         // Then process regular commands if not busy with immediate commands
         else {
           String command = commandQueue->pop();
           Debug::verbose("MotionTask", "Processing command from queue: " + command);
+          
+          // Check if this is a motion command (G0/G1)
+          bool isMotionCommand = command.startsWith("G0") || command.startsWith("G1");
           
           // Parse as G-code
           if (!gCodeParser->parse(command)) {
@@ -156,6 +180,10 @@
               // We could abort the job here, but it might be better to continue
               // and let the operator decide whether to stop
             }
+          } else if (isMotionCommand && machineController->isMoving()) {
+            // Set waiting flag for motion commands
+            waitingForMotionComplete = true;
+            Debug::verbose("MotionTask", "Waiting for motion to complete before next command");
           }
         }
       }
@@ -177,6 +205,9 @@
         machineController->emergencyStop();
       }
       
+      // Reset waiting state
+      waitingForMotionComplete = false;
+      
       // Abort any running job
       if (jobManager) {
         jobManager->emergencyAbortJob("Motion task exception: " + String(e.what()));
@@ -189,6 +220,9 @@
       if (machineController) {
         machineController->emergencyStop();
       }
+      
+      // Reset waiting state
+      waitingForMotionComplete = false;
       
       // Abort any running job
       if (jobManager) {
