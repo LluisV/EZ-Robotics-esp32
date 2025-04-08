@@ -78,11 +78,25 @@
     */
    bool executeGCode(const String& command);
    
-   /**
-    * @brief Get the current position of all axes
-    * @return Vector of current positions in user units
-    */
-   std::vector<float> getCurrentPosition() const;
+    /**
+     * @brief Get the current position in world coordinates
+     * @return Vector of current world positions
+     */
+    std::vector<float> getCurrentWorldPosition() const;
+
+    /**
+     * @brief Get the current position in work coordinates
+     * @return Vector of current work positions
+     */
+    std::vector<float> getCurrentWorkPosition() const;
+
+    /**
+     * @brief Get the work offset
+     * @return Vector of work offsets
+     */
+    std::vector<float> getWorkOffset() const {
+      return workOffset;
+    }
    
    /**
     * @brief Get the current position of a specific axis
@@ -170,6 +184,8 @@
     * @return True if within limits (or clamped successfully), false if out of limits (and not clamping)
     */
    bool validatePosition(const String& motorName, float position, bool clampToLimits, float& clampedPosition);
+
+   std::vector<float> applyMachineLimits(const std::vector<float>& machinePos);
 
 
    ConfigManager* configManager;

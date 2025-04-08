@@ -33,20 +33,23 @@
    
    if (cleanCmd.startsWith("POS")) {
     Debug::timerStart("CommandProcessor", "GetPosition");
-    std::vector<float> positions = machineController->getCurrentPosition();
+    std::vector<float> workPositions = machineController->getCurrentWorkPosition();
+    std::vector<float> worldPositions = machineController->getCurrentWorldPosition();
+    std::vector<float> workOffset = machineController->getWorkOffset();
     Debug::timerEnd("CommandProcessor", "GetPosition");
     
     String posStr = "";
     
-    for (size_t i = 0; i < positions.size(); i++) {
+    for (size_t i = 0; i < workPositions.size(); i++) {
       Motor* motor = machineController->getMotorManager()->getMotor(i);
       if (motor) {
-        posStr += " " + motor->getName() + ":" + String(positions[i], 3);
+        posStr += " " + motor->getName() + ":" + String(workPositions[i], 3) + 
+                  " (" + motor->getName() + "_world:" + String(worldPositions[i], 3) + ")";
       }
     }
     
-    return "<RESPONSE:POS> " + posStr;
-   } 
+    return "<RESPONSE:POS>" + posStr;
+  } 
    else if (cleanCmd.startsWith("STATUS")) {
      // Report machine status
      String status = "";

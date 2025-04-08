@@ -9,12 +9,10 @@
  
  GCodeParser::GCodeParser(MachineController* machineController)
  : machineController(machineController),
-   lastFeedrate(1000.0f),
-   absoluteMode(true),
-   imperialUnits(false)
-{
- Debug::info("GCodeParser", "Initialized with machine controller");
-}
+   lastFeedrate(1000.0f)
+  {
+  Debug::info("GCodeParser", "Initialized with machine controller");
+  }
  
 bool GCodeParser::parse(const String& command) {
   Debug::verbose("GCodeParser", "Parsing command: " + command);
@@ -100,7 +98,7 @@ bool GCodeParser::parse(const String& command) {
   
   if(result)
     Debug::info("GCodeParser", "Executing: " + command);
-    
+
   return result;
 }
  
@@ -227,12 +225,15 @@ int GCodeParser::extractCode(const String& command, char& codeType) {
          lastFeedrate = f;
        }
        
-       // Convert to mm if in imperial mode
-       if (imperialUnits) {
-         if (!isnan(x)) x *= 25.4f;
-         if (!isnan(y)) y *= 25.4f;
-         if (!isnan(z)) z *= 25.4f;
-         f *= 25.4f;
+       // Handle relative mode
+       if (!machineController->isAbsoluteMode()) {
+         // In relative mode, get current positions and add the specified offsets
+         std::vector<float> currentPos = machineController->getCurrentWorkPosition();
+         
+         // Only modify coordinates that were specified in the command
+         if (!isnan(x)) x += currentPos[0];
+         if (!isnan(y)) y += currentPos[1];
+         if (!isnan(z) && currentPos.size() > 2) z += currentPos[2];
        }
        
        // Execute move if any coordinates specified
@@ -265,12 +266,7 @@ int GCodeParser::extractCode(const String& command, char& codeType) {
        return true;
      }
      
-     case 20: // G20: Set units to inches
-       imperialUnits = true;
-       return true;
-       
      case 21: // G21: Set units to mm
-       imperialUnits = false;
        return true;
        
      case 28: { // G28: Home
@@ -309,36 +305,36 @@ int GCodeParser::extractCode(const String& command, char& codeType) {
      }
      
      case 90: // G90: Set to absolute positioning
-       absoluteMode = true;
+       machineController->setAbsoluteMode(true);
        return true;
        
      case 91: // G91: Set to relative positioning
-       absoluteMode = false;
+       machineController->setAbsoluteMode(false);
        return true;
        
-     case 92: { // G92: Set position
-       std::vector<float> currentPos = machineController->getCurrentPosition();
-       std::vector<float> offsets = currentPos;
-       
-       auto it = params.find('X');
-       if (it != params.end()) offsets[0] = it->second;
-       
-       it = params.find('Y');
-       if (it != params.end()) offsets[1] = it->second;
-       
-       it = params.find('Z');
-       if (it != params.end()) offsets[2] = it->second;
-       
-       machineController->setWorkOffset(offsets);
-       return true;
-     }
+       case 92: { // G92: Set work position
+        std::vector<float> currentWorldPos = machineController->getCurrentWorldPosition();
+        std::vector<float> newWorkOffset = currentWorldPos;
+        
+        auto it = params.find('X');
+        if (it != params.end()) newWorkOffset[0] = currentWorldPos[0] - it->second;
+        
+        it = params.find('Y');
+        if (it != params.end()) newWorkOffset[1] = currentWorldPos[1] - it->second;
+        
+        it = params.find('Z');
+        if (it != params.end()) newWorkOffset[2] = currentWorldPos[2] - it->second;
+        
+        machineController->setWorkOffset(newWorkOffset);
+        return true;
+      }
      
      default:
        Serial.println("Unsupported G-code: G" + String(code));
        return false;
    }
- }
- 
+}
+
  bool GCodeParser::executeMCode(int code, const std::map<char, float>& params) {
    switch (code) {
      case 0:  // M0: Program pause

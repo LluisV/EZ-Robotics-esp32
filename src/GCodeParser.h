@@ -38,8 +38,6 @@
  private:
    MachineController* machineController;  ///< MachineController reference
    float lastFeedrate;                    ///< Last used feedrate
-   bool absoluteMode;                     ///< True if in absolute mode, false if in relative mode
-   bool imperialUnits;                    ///< True if using imperial units, false if metric
    
    // Last command parameters
    std::map<char, float> lastParams;

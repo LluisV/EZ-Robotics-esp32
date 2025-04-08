@@ -154,14 +154,23 @@
      }
      
      // Add position information
-     status += "\nPosition: ";
-     std::vector<float> positions = machineController->getCurrentPosition();
-     for (size_t i = 0; i < positions.size(); i++) {
-       Motor* motor = machineController->getMotorManager()->getMotor(i);
-       if (motor) {
-         status += motor->getName() + ":" + String(positions[i], 3) + " ";
-       }
-     }
+     status += "\nPosition (Work): ";
+      std::vector<float> workPositions = machineController->getCurrentWorkPosition();
+      for (size_t i = 0; i < workPositions.size(); i++) {
+        Motor* motor = machineController->getMotorManager()->getMotor(i);
+        if (motor) {
+          status += motor->getName() + ":" + String(workPositions[i], 3) + " ";
+        }
+      }
+
+      status += "\nPosition (World): ";
+      std::vector<float> worldPositions = machineController->getCurrentWorldPosition();
+      for (size_t i = 0; i < worldPositions.size(); i++) {
+        Motor* motor = machineController->getMotorManager()->getMotor(i);
+        if (motor) {
+          status += motor->getName() + ":" + String(worldPositions[i], 3) + " ";
+        }
+      }
      
      // Add buffer status
      status += "\nBuffer: " + String(commandQueue->size()) + " commands";
@@ -828,24 +837,41 @@
   MachineController* machineController = commandProcessor->getMachineController();
   if (!machineController) return;
 
-  // Get current position
-  std::vector<float> currentPosition = machineController->getCurrentPosition();
+  // Get current positions
+  std::vector<float> workPosition = machineController->getCurrentWorkPosition();
+  std::vector<float> worldPosition = machineController->getCurrentWorldPosition();
 
   // Only send if position has changed or force is true
   if (force || 
       lastReportedPosition.empty() || 
-      currentPosition != lastReportedPosition) {
+      workPosition != lastReportedPosition) {
     
-    // Format telemetry message
-    String telemetryMsg = "[TELEMETRY][POS] X:" + String(currentPosition[0], 3) + 
-                          " Y:" + String(currentPosition[1], 3) + 
-                          " Z:" + String(currentPosition[2], 3);
+    // Format telemetry message with JSON-like format for better parsing
+    String telemetryMsg = "[TELEMETRY]{";
+    telemetryMsg += "\"work\":{";
+    
+    // Make sure we have at least 3 axes
+    if (workPosition.size() >= 3) {
+      telemetryMsg += "\"X\":" + String(workPosition[0], 3) + ",";
+      telemetryMsg += "\"Y\":" + String(workPosition[1], 3) + ",";
+      telemetryMsg += "\"Z\":" + String(workPosition[2], 3);
+    }
+    
+    telemetryMsg += "},\"world\":{";
+    
+    if (worldPosition.size() >= 3) {
+      telemetryMsg += "\"X\":" + String(worldPosition[0], 3) + ",";
+      telemetryMsg += "\"Y\":" + String(worldPosition[1], 3) + ",";
+      telemetryMsg += "\"Z\":" + String(worldPosition[2], 3);
+    }
+    
+    telemetryMsg += "}}";
     
     // Send the message
     sendMessage(telemetryMsg);
     
     // Update tracking variables
-    lastReportedPosition = currentPosition;
+    lastReportedPosition = workPosition;
     lastTelemetryTime = currentTime;
   }
 }

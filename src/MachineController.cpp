@@ -39,6 +39,37 @@
    return true;
  }
  
+ std::vector<float> MachineController::getCurrentWorldPosition() const {
+  std::vector<float> positions;
+  
+  if (!motorManager) {
+    return positions;
+  }
+  
+  // Get current position in machine coordinates (world coordinates)
+  int numMotors = motorManager->getNumMotors();
+  for (int i = 0; i < numMotors; i++) {
+    Motor* motor = motorManager->getMotor(i);
+    if (motor) {
+      positions.push_back(motor->getPositionInUnits());
+    }
+  }
+  
+  return positions;
+}
+
+ std::vector<float> MachineController::getCurrentWorkPosition() const {
+  // Get world positions
+  std::vector<float> worldPositions = getCurrentWorldPosition();
+  
+  // Apply work offset to get work coordinates
+  for (size_t i = 0; i < worldPositions.size() && i < workOffset.size(); i++) {
+    worldPositions[i] -= workOffset[i];
+  }
+  
+  return worldPositions;
+}
+
  bool MachineController::homeAll() {
    if (!motorManager) {
      return false;
@@ -68,20 +99,26 @@
     return false;
   }
   
-  // Validate positions against limits
-  std::vector<float> validatedPositions = positions;
+  // First convert work coordinates to machine coordinates WITHOUT clamping
+  std::vector<float> machinePos = positions;
+  for (size_t i = 0; i < machinePos.size() && i < workOffset.size(); i++) {
+    machinePos[i] += workOffset[i];
+  }
+  
+  // Now validate the machine (world) coordinates against limits
   bool positionOutOfBounds = false;
   String outOfBoundsMessage = "Position out of bounds: ";
+  std::vector<float> validatedMachinePos = machinePos;
   
   for (int i = 0; i < motorManager->getNumMotors(); i++) {
     Motor* motor = motorManager->getMotor(i);
-    if (motor && !isnan(positions[i])) {
-      float clampedPos = positions[i];
-      if (!validatePosition(motor->getName(), positions[i], false, clampedPos)) {
+    if (motor && !isnan(machinePos[i])) {
+      float clampedPos = machinePos[i];
+      if (!validatePosition(motor->getName(), machinePos[i], false, clampedPos)) {
         positionOutOfBounds = true;
-        outOfBoundsMessage += motor->getName() + "=" + String(positions[i]) + " ";
+        outOfBoundsMessage += motor->getName() + "=" + String(machinePos[i]) + " ";
       }
-      validatedPositions[i] = clampedPos;
+      validatedMachinePos[i] = clampedPos;
     }
   }
   
@@ -95,11 +132,11 @@
   // Set current feedrate for future commands
   currentFeedrate = feedrate;
   
-  // Convert work coordinates to machine coordinates
-  std::vector<float> machinePos = workToMachinePositions(validatedPositions);
+  // Apply soft limits to ensure machine boundaries are respected
+  std::vector<float> constrainedMachinePos = applyMachineLimits(validatedMachinePos);
   
   // For kinematic machines, convert machine coordinates to motor positions
-  std::vector<float> targetMotorPos = machineToMotorPositions(machinePos);
+  std::vector<float> targetMotorPos = machineToMotorPositions(constrainedMachinePos);
   
   // Handle different movement types
   if (movementType == RAPID_MOVE) {
@@ -112,6 +149,34 @@
     return motorManager->moveToFeedrate(targetMotorPos, feedrate);
   }
 }
+
+std::vector<float> MachineController::applyMachineLimits(const std::vector<float>& machinePos) {
+  std::vector<float> constrainedPos = machinePos;
+  
+  // Apply soft limits by clamping to machine boundaries
+  for (size_t i = 0; i < constrainedPos.size(); i++) {
+    if (i < motorManager->getNumMotors()) {
+      Motor* motor = motorManager->getMotor(i);
+      if (motor) {
+        const MotorConfig* config = motor->getConfig();
+        if (config) {
+          // Clamp to machine limits
+          if (constrainedPos[i] < 0) {
+            Debug::warning("MachineController", "Clamping " + motor->getName() + 
+                           " position to minimum limit (0.0)");
+            constrainedPos[i] = 0.0f;
+          } else if (constrainedPos[i] > config->maxTravel) {
+            Debug::warning("MachineController", "Clamping " + motor->getName() + 
+                           " position to maximum limit (" + String(config->maxTravel) + ")");
+            constrainedPos[i] = config->maxTravel;
+          }
+        }
+      }
+    }
+  }
+  
+  return constrainedPos;
+}
  
 
 bool MachineController::moveTo(float x, float y, float z, float feedrate, MovementType movementType) {
@@ -123,7 +188,7 @@ bool MachineController::moveTo(float x, float y, float z, float feedrate, Moveme
   Motor* zMotor = motorManager->getMotorByName("Z");
   
   // Prepare position array with current positions as defaults
-  std::vector<float> currentPos = getCurrentPosition();
+  std::vector<float> currentPos = getCurrentWorkPosition();
   positions = currentPos;
   
   // Update positions for X, Y, Z if they exist and values are specified
@@ -201,7 +266,6 @@ bool MachineController::moveTo(float x, float y, float z, float feedrate, Moveme
  
  bool MachineController::executeGCode(const String& command) {
    // This is a simplified G-code interpreter
-   // A full implementation would handle more codes and parameters
    
    // Remove comments and trim
    String code = command;
@@ -267,12 +331,12 @@ bool MachineController::moveTo(float x, float y, float z, float feedrate, Moveme
        }
        
        // Handle relative mode
-       std::vector<float> currentPos = getCurrentPosition();
+       std::vector<float> currentPos = getCurrentWorkPosition();
        if (!absoluteMode) {
-         if (!isnan(x)) x += currentPos[0];
-         if (!isnan(y)) x += currentPos[1];
-         if (!isnan(z)) x += currentPos[2];
-       }
+        if (!isnan(x)) x += currentPos[0];
+        if (!isnan(y)) x += currentPos[1];
+        if (!isnan(z)) x += currentPos[2];
+      }
        
        if (!isnan(x) || !isnan(y) || !isnan(z)) {
          float xPos = isnan(x) ? currentPos[0] : x;
@@ -289,11 +353,11 @@ bool MachineController::moveTo(float x, float y, float z, float feedrate, Moveme
        }
        
        // Handle relative mode
-       std::vector<float> currentPos = getCurrentPosition();
+       std::vector<float> currentPos = getCurrentWorkPosition();
        if (!absoluteMode) {
          if (!isnan(x)) x += currentPos[0];
-         if (!isnan(y)) x += currentPos[1];
-         if (!isnan(z)) x += currentPos[2];
+         if (!isnan(y)) y += currentPos[1];
+         if (!isnan(z)) z += currentPos[2];
        }
        
        if (!isnan(x) || !isnan(y) || !isnan(z)) {
@@ -330,7 +394,7 @@ bool MachineController::moveTo(float x, float y, float z, float feedrate, Moveme
        
      } else if (value == 92) {
        // G92: Set position
-       std::vector<float> currentPos = getCurrentPosition();
+       std::vector<float> currentPos = getCurrentWorldPosition();
        
        if (!isnan(x)) workOffset[0] = motorManager->getMotorByName("X")->getPositionInUnits() - x;
        if (!isnan(y)) workOffset[1] = motorManager->getMotorByName("Y")->getPositionInUnits() - y;
@@ -376,29 +440,6 @@ bool MachineController::moveTo(float x, float y, float z, float feedrate, Moveme
    return false;
  }
  
- std::vector<float> MachineController::getCurrentPosition() const {
-   std::vector<float> positions;
-   
-   if (!motorManager) {
-     return positions;
-   }
-   
-   // Get current position in machine coordinates
-   int numMotors = motorManager->getNumMotors();
-   for (int i = 0; i < numMotors; i++) {
-     Motor* motor = motorManager->getMotor(i);
-     if (motor) {
-       positions.push_back(motor->getPositionInUnits());
-     }
-   }
-   
-   // Apply work offset
-   for (size_t i = 0; i < positions.size() && i < workOffset.size(); i++) {
-     positions[i] -= workOffset[i];
-   }
-   
-   return positions;
- }
  
  float MachineController::getCurrentAxisPosition(const String& axisName) const {
    if (!motorManager) {
@@ -452,12 +493,13 @@ bool MachineController::moveTo(float x, float y, float z, float feedrate, Moveme
  }
  
  std::vector<float> MachineController::workToMachinePositions(const std::vector<float>& workPos) {
-   std::vector<float> machinePos = workPos;
-   
-   // Apply work offset
-   for (size_t i = 0; i < machinePos.size() && i < workOffset.size(); i++) {
-     machinePos[i] += workOffset[i];
-   }
-   
-   return machinePos;
- }
+  std::vector<float> machinePos = workPos;
+  
+  // Apply work offset to get machine coordinates
+  for (size_t i = 0; i < machinePos.size() && i < workOffset.size(); i++) {
+    machinePos[i] += workOffset[i];
+  }
+  
+  // Apply machine limits to ensure we stay within bounds
+  return applyMachineLimits(machinePos);
+}
