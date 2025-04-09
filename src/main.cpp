@@ -25,7 +25,7 @@ TaskHandle_t commTaskHandle = NULL;
 TaskHandle_t motionTaskHandle = NULL;
 
 // Command queue parameters
-#define COMMAND_QUEUE_SIZE 30
+#define COMMAND_QUEUE_SIZE 500
 
 // Global objects
 ConfigManager configManager;

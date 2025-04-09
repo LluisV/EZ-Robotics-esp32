@@ -132,7 +132,6 @@ bool MotorManager::isAnyMotorMoving() const
   {
     if (motor->isMoving())
     {
-      Debug::verbose("MotorManager", "Motor " + motor->getName() + " is currently moving");
       return true;
     }
   }
