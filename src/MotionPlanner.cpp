@@ -106,8 +106,8 @@ bool MotionPlanner::addMove(const std::vector<float> &targetPos, float feedrate,
     segment.deceleration = 500.0f;
 
     // Initial entry/exit velocities (to be recalculated during planning)
-    segment.entryVelocity = 0.0f;
-    segment.exitVelocity = 0.0f;
+    //segment.entryVelocity = 0.0f;
+    //segment.exitVelocity = 0.0f;
 
     // Add to planning queue
     planningQueue.push_back(segment);
@@ -130,6 +130,8 @@ bool MotionPlanner::executeMove()
     {
         return false;
     }
+    if(motorManager->isAnyMotorMoving())
+        return false;
 
     // Ensure velocity profile is up-to-date
     planVelocityProfile();
@@ -168,11 +170,11 @@ bool MotionPlanner::executeSegment(const MotionSegment &segment)
     // Call the appropriate move function based on movement type
     if (segment.type == RAPID_MOVE)
     {
-        return motorManager->moveToRapid(targetPos);
+        return motorManager->moveToRapid(targetPos, segment.acceleration);
     }
     else
     {
-        return motorManager->moveToFeedrate(targetPos, feedrate);
+        return motorManager->moveToFeedrate(targetPos, feedrate, segment.acceleration);
     }
 }
 
@@ -234,8 +236,8 @@ void MotionPlanner::planVelocityProfile()
 
     // First segment entry and last segment exit velocity should be zero
     // for complete start/stop
-    planningQueue.front().entryVelocity = 0.0f;
-    planningQueue.back().exitVelocity = 0.0f;
+    //planningQueue.front().entryVelocity = 0.0f;
+    //planningQueue.back().exitVelocity = 0.0f;
 
     // Forward pass: Adjust exit velocities based on maximum allowed acceleration
     forwardPass();

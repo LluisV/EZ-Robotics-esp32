@@ -65,7 +65,7 @@ public:
    * @param positions Array of target positions in user units
    * @return True if the move was started, false otherwise
    */
-  bool moveToRapid(const std::vector<float> &positions);
+  bool moveToRapid(const std::vector<float> &positions, float acceleration = 0.0f);
 
   /**
    * @brief Perform synchronized move of multiple motors at specified feedrate
@@ -73,7 +73,7 @@ public:
    * @param feedrate Feedrate in mm/min
    * @return True if the move was started, false otherwise
    */
-  bool moveToFeedrate(const std::vector<float> &positions, float feedrate);
+  bool moveToFeedrate(const std::vector<float> &positions, float feedrate, float acceleration = 0.0f);
 
   /**
    * @brief Stop all motors

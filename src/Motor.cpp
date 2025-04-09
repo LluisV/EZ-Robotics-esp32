@@ -165,7 +165,7 @@ float Motor::stepsToUnits(long steps) const
   return steps * unitsPerStep;
 }
 
-bool Motor::moveTo(long position, int speed)
+bool Motor::moveTo(long position, float speed, float acceleration)
 {
   if (!stepper || status == HOMING)
   {
@@ -196,7 +196,13 @@ bool Motor::moveTo(long position, int speed)
   }
 
   // Set acceleration if necessary
-  if (currentAcceleration > 0)
+  if(acceleration > 0)
+  {
+    stepper->setAcceleration(acceleration);
+    Debug::verbose("Motor", "Setting custom acceleration " + String(acceleration) +
+                                " for motor " + config->name);
+  }
+  else if (currentAcceleration > 0)
   {
     // In case we haven't set the acceleration since initialization
     stepper->setAcceleration(currentAcceleration);
@@ -223,14 +229,16 @@ bool Motor::moveTo(long position, int speed)
   return true;
 }
 
-bool Motor::moveToUnits(float position, float speed)
+
+bool Motor::moveToUnits(float position, float speed, float acceleration)
 {
   long steps = unitsToSteps(position);
   int stepsPerSec = speed > 0.0f ? unitsToSteps(speed) : 0;
-  return moveTo(steps, stepsPerSec);
+  return moveTo(steps, stepsPerSec, acceleration);
 }
 
-bool Motor::moveRelative(long steps, int speed)
+
+bool Motor::moveRelative(long steps, float speed, float acceleration)
 {
   if (!stepper || status == HOMING)
   {
@@ -247,6 +255,15 @@ bool Motor::moveRelative(long steps, int speed)
     stepper->setSpeedInHz(config->maxSpeed);
   }
 
+  if(acceleration > 0)
+  {
+    setAcceleration(acceleration);
+  }
+  else
+  {
+    setAcceleration(config->acceleration);
+  }
+
   // Start the move
   stepper->move(steps);
   status = MOVING;
@@ -254,11 +271,11 @@ bool Motor::moveRelative(long steps, int speed)
   return true;
 }
 
-bool Motor::moveRelativeUnits(float units, float speed)
+bool Motor::moveRelativeUnits(float units, float speed, float acceleration)
 {
   long steps = unitsToSteps(units);
   int stepsPerSec = speed > 0.0f ? unitsToSteps(speed) : 0;
-  return moveRelative(steps, stepsPerSec);
+  return moveRelative(steps, stepsPerSec, acceleration);
 }
 
 void Motor::stop(bool immediate)

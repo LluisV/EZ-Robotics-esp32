@@ -10,6 +10,7 @@
 #include <vector>
 #include <map>
 #include "MachineController.h"
+#include "CommonTypes.h"
 
 /**
  * @brief G-code parser class
@@ -26,9 +27,9 @@ public:
   /**
    * @brief Parse and execute a G-code command
    * @param command G-code command string
-   * @return True if successful, false otherwise
+   * @return GCodeParseResult indicating parsing and queueing status
    */
-  bool parse(const String &command);
+  GCodeParseResult parse(const String &command);
 
   /**
    * @brief Get a list of supported G-codes

@@ -14,7 +14,7 @@ GCodeParser::GCodeParser(MachineController *machineController)
   Debug::info("GCodeParser", "Initialized with machine controller");
 }
 
-bool GCodeParser::parse(const String &command)
+GCodeParseResult GCodeParser::parse(const String &command)
 {
   Debug::verbose("GCodeParser", "Parsing command: " + command);
 
@@ -25,7 +25,7 @@ bool GCodeParser::parse(const String &command)
   if (trimmedCmd.length() == 0 || trimmedCmd.startsWith(";"))
   {
     Debug::verbose("GCodeParser", "Ignoring empty line or comment");
-    return true;
+    return GCodeParseResult::SUCCESS;
   }
 
   // Remove inline comments
@@ -43,7 +43,14 @@ bool GCodeParser::parse(const String &command)
   {
     Debug::error("GCodeParser", "Command validation failed: " + errorMessage);
     Serial.println("Error: " + errorMessage);
-    return false;
+    return GCodeParseResult::PARSE_ERROR;
+  }
+
+  // Check if motion planner is full
+  if (machineController->getMotionPlanner()->isFull())
+  {
+    Debug::warning("GCodeParser", "Motion planner queue is full");
+    return GCodeParseResult::QUEUE_FULL;
   }
 
   // Extract G/M code
@@ -62,7 +69,7 @@ bool GCodeParser::parse(const String &command)
   {
     Debug::error("GCodeParser", "Parameter parsing error: " + String(e.what()));
     Serial.println("Error: Parameter parsing failed - " + String(e.what()));
-    return false;
+    return GCodeParseResult::PARSE_ERROR;
   }
 
   // Log parsed parameters
@@ -91,26 +98,27 @@ bool GCodeParser::parse(const String &command)
     {
       Debug::error("GCodeParser", "Unsupported code type: " + String(codeType));
       Serial.println("Unsupported code type: " + String(codeType));
-      return false;
+      return GCodeParseResult::PARSE_ERROR;
     }
   }
   catch (const std::exception &e)
   {
     Debug::error("GCodeParser", "Exception during command execution: " + String(e.what()));
     Serial.println("Error executing command: " + String(e.what()));
-    result = false;
+    return GCodeParseResult::PARSE_ERROR;
   }
   catch (...)
   {
     Debug::error("GCodeParser", "Unknown exception during command execution");
     Serial.println("Unknown error executing command");
-    result = false;
+    return GCodeParseResult::PARSE_ERROR;
   }
 
   if (!result)
   {
     Debug::warning("GCodeParser", "Failed to execute command: " + command);
     Serial.println("Failed to execute command: " + command);
+    return GCodeParseResult::PARSE_ERROR;
   }
   else
   {
@@ -120,7 +128,7 @@ bool GCodeParser::parse(const String &command)
   if (result)
     Debug::info("GCodeParser", "Executing: " + command);
 
-  return result;
+  return GCodeParseResult::SUCCESS;
 }
 
 std::vector<String> GCodeParser::getSupportedCodes() const

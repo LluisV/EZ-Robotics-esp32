@@ -84,7 +84,7 @@ public:
    * @param speed Speed in steps per second (optional)
    * @return True if the move was started, false otherwise
    */
-  bool moveTo(long position, int speed = 0);
+  bool moveTo(long position, float speed = 0.0f, float acceleration = 0.0f);
 
   /**
    * @brief Move the motor to a target position in user units
@@ -92,7 +92,7 @@ public:
    * @param speed Speed in user units per second (optional)
    * @return True if the move was started, false otherwise
    */
-  bool moveToUnits(float position, float speed = 0.0f);
+  bool moveToUnits(float position, float speed = 0.0f, float acceleration = 0.0f);
 
   /**
    * @brief Move the motor relative to current position
@@ -100,7 +100,7 @@ public:
    * @param speed Speed in steps per second (optional)
    * @return True if the move was started, false otherwise
    */
-  bool moveRelative(long steps, int speed = 0);
+  bool moveRelative(long steps, float speed = 0.0f, float acceleration = 0.0f);
 
   /**
    * @brief Move the motor relative to current position in user units
@@ -108,7 +108,7 @@ public:
    * @param speed Speed in user units per second (optional)
    * @return True if the move was started, false otherwise
    */
-  bool moveRelativeUnits(float units, float speed = 0.0f);
+  bool moveRelativeUnits(float units, float speed = 0.0f, float acceleration = 0.0f);
 
   /**
    * @brief Stop the motor

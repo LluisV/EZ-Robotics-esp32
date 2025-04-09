@@ -162,16 +162,37 @@ void motionTask(void *parameter)
 
           // Process immediate command - all interpretation should be done here
           // Emergency stop commands are already properly formatted as M112 by CommunicationManager
-          if (!gCodeParser->parse(immediateCmd))
+          GCodeParseResult parseResult = gCodeParser->parse(immediateCmd);
+          switch (parseResult)
           {
-            Debug::error("MotionTask", "Failed to execute immediate command: " + immediateCmd);
+            case GCodeParseResult::PARSE_ERROR:
+              Debug::error("MotionTask", "Failed to execute immediate command: " + immediateCmd);
 
-            // For immediate commands, we might want to take drastic action
-            if (immediateCmd.startsWith("M112") || immediateCmd.startsWith("STOP"))
-            {
-              // For emergency stop, still try to stop everything
-              machineController->emergencyStop();
-            }
+              // For immediate commands, we might want to take drastic action
+              if (immediateCmd.startsWith("M112") || immediateCmd.startsWith("STOP"))
+              {
+                // For emergency stop, still try to stop everything
+                machineController->emergencyStop();
+              }
+              break;
+
+            case GCodeParseResult::QUEUE_FULL:
+              Debug::warning("MotionTask", "Motion planner queue full for immediate command, requeueing: " + immediateCmd);
+              if (immediateCmd.startsWith("M112") || immediateCmd.startsWith("STOP"))
+              {
+                // For emergency stop, still try to stop everything
+                machineController->emergencyStop();
+              }
+              else
+              {
+                // Requeue the immediate command to be tried again
+                commandQueue->push(immediateCmd, IMMEDIATE);
+              }
+              break;
+
+            case GCodeParseResult::SUCCESS:
+              // Command successfully processed
+              break;
           }
         }
         // Then process regular commands if not busy with immediate commands
@@ -182,21 +203,30 @@ void motionTask(void *parameter)
           String command = commandQueue->pop();
           Debug::verbose("MotionTask", "Processing command from queue: " + command);
 
-          // Check if this is a motion command (G0/G1)
-          bool isMotionCommand = command.startsWith("G0") || command.startsWith("G1");
-
           // Parse as G-code
-          if (!gCodeParser->parse(command))
+          GCodeParseResult parseResult = gCodeParser->parse(command);
+          switch (parseResult)
           {
-            Debug::error("MotionTask", "Failed to execute command: " + command);
+            case GCodeParseResult::PARSE_ERROR:
+              Debug::error("MotionTask", "Failed to execute command: " + command);
 
-            // If this is part of a job, we might want to handle it specially
-            if (jobManager && jobManager->isJobRunning())
-            {
-              Debug::warning("MotionTask", "Command failed during job execution");
-              // We could abort the job here, but it might be better to continue
-              // and let the operator decide whether to stop
-            }
+              // If this is part of a job, we might want to handle it specially
+              if (jobManager && jobManager->isJobRunning())
+              {
+                Debug::warning("MotionTask", "Command failed during job execution");
+                // Depending on the error policy, we might want to handle this differently
+              }
+              break;
+
+            case GCodeParseResult::QUEUE_FULL:
+              Debug::warning("MotionTask", "Motion planner queue full, requeueing command: " + command);
+              // Requeue the command to be tried again
+              commandQueue->push(command, IMMEDIATE);
+              break;
+
+            case GCodeParseResult::SUCCESS:
+              // Command successfully processed
+              break;
           }
         }
       }
