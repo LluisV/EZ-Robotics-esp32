@@ -404,15 +404,6 @@ bool GCodeParser::executeMCode(int code, const std::map<char, float> &params)
   {
   case 0: // M0: Program pause
   case 1: // M1: Program pause
-    // Just pause, wait for user input
-    Serial.println("Program paused. Send any command to continue.");
-    while (!Serial.available())
-    {
-      delay(100);
-    }
-    // Clear input buffer
-    while (Serial.available())
-      Serial.read();
     return true;
 
   case 2:  // M2: Program end

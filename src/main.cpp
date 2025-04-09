@@ -136,32 +136,23 @@ void communicationTask(void *parameter)
 void motionTask(void *parameter)
 {
   Debug::info("MotionTask", "Task started on Core " + String(xPortGetCoreID()));
-  bool waitingForMotionComplete = false;
-
+  
   String pendingCommand = "";
 
   while (true)
   {
     try
     {
-
       // Check if there are any moves in the motion planner that need to be executed
-      if (machineController) {
-        if (!waitingForMotionComplete && machineController->processMotionQueue()) {
-          waitingForMotionComplete = true;
+      if (machineController) { 
+        if (machineController->processMotionQueue()) {
+          // A move was executed from the queue
           Debug::verbose("MotionTask", "Executed move from motion queue");
         }
       }
 
-      // Clear waiting flag if motion is complete
-      if (waitingForMotionComplete && machineController && !machineController->isMoving()) {
-        waitingForMotionComplete = false;
-      }
-
-      // Only process new commands if motion planner is not full and not waiting
-      if (!waitingForMotionComplete && machineController && 
-        machineController->getMotionPlanner() && 
-        !machineController->getMotionPlanner()->isFull())
+      // Process commands from queue when not waiting for motion to complete
+      if (machineController && gCodeParser && commandQueue && !commandQueue->isEmpty())
       {
         // First check for immediate commands (already placed in the queue by CommunicationManager)
         String immediateCmd = commandQueue->getNextImmediate();
@@ -186,6 +177,8 @@ void motionTask(void *parameter)
         // Then process regular commands if not busy with immediate commands
         else
         {
+          if(commandQueue->isEmpty())
+            continue;
           String command = commandQueue->pop();
           Debug::verbose("MotionTask", "Processing command from queue: " + command);
 
@@ -234,8 +227,6 @@ void motionTask(void *parameter)
       {
         jobManager->emergencyAbortJob("Motion task exception: " + String(e.what()));
       }
-
-      waitingForMotionComplete = false;
     }
     catch (...)
     {

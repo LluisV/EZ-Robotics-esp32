@@ -77,7 +77,6 @@ bool CommandQueue::push(const String &command, CommandType type)
 
 String CommandQueue::pop()
 {
-  Debug::verbose("CommandQueue", "Attempting to pop command");
 
   if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE)
   {
