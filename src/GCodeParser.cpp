@@ -283,6 +283,7 @@ bool GCodeParser::executeGCode(int code, const std::map<char, float> &params)
     if (!isnan(x) || !isnan(y) || !isnan(z))
     {
       MovementType moveType = (code == 0) ? RAPID_MOVE : LINEAR_MOVE;
+      // Use the motion planner indirectly through MachineController::moveTo
       return machineController->moveTo(x, y, z, f, moveType);
     }
 

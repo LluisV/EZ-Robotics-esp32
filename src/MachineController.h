@@ -9,18 +9,10 @@
 #include <Arduino.h>
 #include <vector>
 #include "MotorManager.h"
+#include "MotionPlanner.h"
 #include "Kinematics.h"
+#include "CommonTypes.h"
 
-/**
- * @brief Movement types
- */
-enum MovementType
-{
-  RAPID_MOVE,  ///< Rapid movement (G0)
-  LINEAR_MOVE, ///< Linear movement (G1)
-  ARC_CW_MOVE, ///< Clockwise arc (G2)
-  ARC_CCW_MOVE ///< Counter-clockwise arc (G3)
-};
 
 /**
  * @brief Controller class for the CNC machine
@@ -72,6 +64,18 @@ public:
    * @return True if successful, false otherwise
    */
   bool moveTo(float x, float y, float z, float feedrate, MovementType movementType);
+
+  /**
+   * @brief Process motion planner queue
+   * @return True if a move was processed, false otherwise
+   */
+  bool processMotionQueue();
+
+  /**
+   * @brief Get motion planner
+   * @return Pointer to the motion planner
+   */
+  MotionPlanner* getMotionPlanner() { return motionPlanner; }
 
   /**
    * @brief Execute a G-code command
@@ -167,6 +171,7 @@ private:
   std::vector<float> workOffset; ///< Work coordinate system offset
   float currentFeedrate;         ///< Current feedrate in mm/min
   bool absoluteMode;             ///< True if in absolute mode, false if in relative mode
+  MotionPlanner *motionPlanner;  ///< Motion planner for path optimization
 
   /**
    * @brief Convert machine coordinates to motor positions

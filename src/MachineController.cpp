@@ -11,7 +11,8 @@ MachineController::MachineController(MotorManager *motorManager, ConfigManager *
       configManager(configManager),
       kinematics(nullptr),
       currentFeedrate(1000.0f),
-      absoluteMode(true)
+      absoluteMode(true),
+      motionPlanner(nullptr)
 {
   // Initialize work offset to zero
   if (motorManager)
@@ -38,6 +39,13 @@ bool MachineController::initialize()
 
   // Initialize work offset to zero for all motors
   workOffset.resize(motorManager->getNumMotors(), 0.0f);
+
+  motionPlanner = new MotionPlanner(motorManager, configManager);
+  if (!motionPlanner || !motionPlanner->initialize())
+  {
+    Debug::error("MachineController", "Failed to initialize motion planner");
+    return false;
+  }
 
   Serial.println("Machine controller initialized");
   return true;
@@ -159,47 +167,14 @@ bool MachineController::moveTo(const std::vector<float> &positions, float feedra
   // For kinematic machines, convert machine coordinates to motor positions
   std::vector<float> targetMotorPos = machineToMotorPositions(constrainedMachinePos);
 
-  // Handle different movement types
-  if (movementType == RAPID_MOVE)
+  // Instead of direct execution, add to motion planner
+  if (!motionPlanner)
   {
-    // G0: Rapid move - use maximum speed regardless of feedrate
-    Debug::verbose("MachineController", "Executing RAPID_MOVE (G0) at maximum speed");
-    return motorManager->moveToRapid(targetMotorPos);
+    Debug::error("MachineController", "Motion planner not initialized");
+    return false;
   }
-  else
-  {
-    // G1: Linear move - use specified feedrate
-    Debug::verbose("MachineController", "Executing LINEAR_MOVE (G1) with feedrate: " + String(feedrate) + " mm/min");
-    return motorManager->moveToFeedrate(targetMotorPos, feedrate);
-  }
-}
 
-std::vector<float> MachineController::applyMachineLimits(const std::vector<float>& machinePos) {
-  std::vector<float> constrainedPos = machinePos;
-  
-  // Apply soft limits by clamping to machine boundaries
-  for (size_t i = 0; i < constrainedPos.size(); i++) {
-    if (i < motorManager->getNumMotors()) {
-      Motor* motor = motorManager->getMotor(i);
-      if (motor) {
-        const MotorConfig* config = motor->getConfig();
-        if (config) {
-          // Clamp to machine limits
-          if (constrainedPos[i] < config->minPosition) {
-            Debug::warning("MachineController", "Clamping " + motor->getName() + 
-                           " position to minimum limit (" + String(config->minPosition) + ")");
-            constrainedPos[i] = config->minPosition;
-          } else if (constrainedPos[i] > config->maxPosition) {
-            Debug::warning("MachineController", "Clamping " + motor->getName() + 
-                           " position to maximum limit (" + String(config->maxPosition) + ")");
-            constrainedPos[i] = config->maxPosition;
-          }
-        }
-      }
-    }
-  }
-  
-  return constrainedPos;
+  return motionPlanner->addMove(targetMotorPos, feedrate, movementType);
 }
 
 bool MachineController::moveTo(float x, float y, float z, float feedrate, MovementType movementType)
@@ -240,51 +215,102 @@ bool MachineController::moveTo(float x, float y, float z, float feedrate, Moveme
   return moveTo(positions, feedrate, movementType);
 }
 
-bool MachineController::validatePosition(const String& motorName, float position, bool clampToLimits, float& clampedPosition) {
+std::vector<float> MachineController::applyMachineLimits(const std::vector<float> &machinePos)
+{
+  std::vector<float> constrainedPos = machinePos;
+
+  // Apply soft limits by clamping to machine boundaries
+  for (size_t i = 0; i < constrainedPos.size(); i++)
+  {
+    if (i < motorManager->getNumMotors())
+    {
+      Motor *motor = motorManager->getMotor(i);
+      if (motor)
+      {
+        const MotorConfig *config = motor->getConfig();
+        if (config)
+        {
+          // Clamp to machine limits
+          if (constrainedPos[i] < config->minPosition)
+          {
+            Debug::warning("MachineController", "Clamping " + motor->getName() +
+                                                    " position to minimum limit (" + String(config->minPosition) + ")");
+            constrainedPos[i] = config->minPosition;
+          }
+          else if (constrainedPos[i] > config->maxPosition)
+          {
+            Debug::warning("MachineController", "Clamping " + motor->getName() +
+                                                    " position to maximum limit (" + String(config->maxPosition) + ")");
+            constrainedPos[i] = config->maxPosition;
+          }
+        }
+      }
+    }
+  }
+
+  return constrainedPos;
+}
+
+bool MachineController::validatePosition(const String &motorName, float position, bool clampToLimits, float &clampedPosition)
+{
   // Default to the input position
   clampedPosition = position;
-  
+
   // Find the motor's configuration
-  const MotorConfig* motorConfig = nullptr;
-  
-  if (configManager) {
+  const MotorConfig *motorConfig = nullptr;
+
+  if (configManager)
+  {
     motorConfig = configManager->getMotorConfigByName(motorName);
   }
-  
-  if (!motorConfig) {
+
+  if (!motorConfig)
+  {
     Debug::warning("MachineController", "No config found for motor " + motorName + " during limit validation");
     return true; // Allow movement if we can't find config (safer than blocking)
   }
-  
+
   // Use the min and max position limits
   const float minLimit = motorConfig->minPosition;
   const float maxLimit = motorConfig->maxPosition;
-  
+
   // Check if position is within limits
   bool withinLimits = true;
-  
-  if (position < minLimit) {
-    Debug::warning("MachineController", motorName + " position " + String(position) + 
-                  " below minimum limit of " + String(minLimit));
+
+  if (position < minLimit)
+  {
+    Debug::warning("MachineController", motorName + " position " + String(position) +
+                                            " below minimum limit of " + String(minLimit));
     withinLimits = false;
-    
-    if (clampToLimits) {
+
+    if (clampToLimits)
+    {
       clampedPosition = minLimit;
       Debug::info("MachineController", "Clamping " + motorName + " to minimum limit " + String(minLimit));
     }
   }
-  else if (position > maxLimit) {
-    Debug::warning("MachineController", motorName + " position " + String(position) + 
-                  " exceeds maximum limit of " + String(maxLimit));
+  else if (position > maxLimit)
+  {
+    Debug::warning("MachineController", motorName + " position " + String(position) +
+                                            " exceeds maximum limit of " + String(maxLimit));
     withinLimits = false;
-    
-    if (clampToLimits) {
+
+    if (clampToLimits)
+    {
       clampedPosition = maxLimit;
       Debug::info("MachineController", "Clamping " + motorName + " to maximum limit " + String(maxLimit));
     }
   }
-  
+
   return withinLimits || clampToLimits;
+}
+
+bool MachineController::processMotionQueue() {
+  if (!motionPlanner) {
+    return false;
+  }
+
+  return motionPlanner->executeMove();
 }
 
 bool MachineController::executeGCode(const String &command)

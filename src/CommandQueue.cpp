@@ -208,8 +208,6 @@ bool CommandQueue::isFull(CommandType type) const
 
 size_t CommandQueue::size() const
 {
-  Debug::verbose("CommandQueue", "Getting total queue size");
-
   if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE)
   {
     Debug::warning("CommandQueue", "Failed to acquire mutex for size");
@@ -218,11 +216,11 @@ size_t CommandQueue::size() const
 
   size_t totalSize = motionCount + settingCount + infoCount + immedCount;
 
-  Debug::verbose("CommandQueue", "Total queue size: " + String(totalSize) +
+  /*Debug::verbose("CommandQueue", "Total queue size: " + String(totalSize) +
                                      " (Motion: " + String(motionCount) +
                                      ", Setting: " + String(settingCount) +
                                      ", Info: " + String(infoCount) +
-                                     ", Immediate: " + String(immedCount) + ")");
+                                     ", Immediate: " + String(immedCount) + ")");*/
 
   xSemaphoreGive(mutex);
   return totalSize;
