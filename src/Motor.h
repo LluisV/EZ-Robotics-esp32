@@ -170,6 +170,12 @@ public:
    */
   void setSpeed(int speedInSteps);
 
+  /**
+   * @brief Get the current speed in steps/second
+   * @return Current speed in steps/second
+   */
+  int getCurrentSpeedSteps() const;
+
 private:
   const MotorConfig *config;          ///< Motor configuration
   FastAccelStepper *stepper;          ///< FastAccelStepper object

@@ -609,3 +609,70 @@
  
    return constrainedPos;
  }
+
+ std::vector<float> MachineController::getCurrentVelocityVector() const
+ {
+   std::vector<float> velocityVector;
+   
+   if (!motorManager) {
+     return velocityVector;
+   }
+   
+   int numMotors = motorManager->getNumMotors();
+   std::vector<float> motorVelocities(numMotors, 0.0f);
+   
+   // Step 1: Get the current velocities of all motors in their native units
+   for (int i = 0; i < numMotors; i++) {
+     Motor *motor = motorManager->getMotor(i);
+     if (motor && motor->isMoving()) {
+       // Get motor speed in steps/sec
+       int currentSpeedSteps = motor->getCurrentSpeedSteps();
+       
+       // Convert from steps/sec to units/sec (mm/sec or deg/sec)
+       float unitsPerStep = motor->stepsToUnits(1) - motor->stepsToUnits(0);
+       float speedInUnitsPerSec = currentSpeedSteps * unitsPerStep;
+       
+       motorVelocities[i] = speedInUnitsPerSec;
+     }
+   }
+   
+   // Step 2: Apply kinematics to convert motor velocities to end effector velocities
+   // This requires the specific kinematics model of the machine
+   
+   if (kinematics) {
+     // If we have a kinematics model, use it to transform motor velocities
+     // to end effector velocities. This is the proper way to handle non-Cartesian
+     // machines or machines with complex kinematics.
+     
+     // NOTE: This requires the kinematics model to implement a method for 
+     // velocity transformation, which isn't currently defined in the Kinematics class.
+     // velocityVector = kinematics->transformVelocity(motorVelocities);
+     
+     // For now, we'll just pass through the motor velocities
+     velocityVector = motorVelocities;
+   } else {
+     // Default case - assume Cartesian kinematics (simple 1:1 mapping)
+     velocityVector = motorVelocities;
+   }
+   
+   return velocityVector;
+}
+
+
+float MachineController::getCurrentVelocity() const
+{
+  if (!isMoving()) {
+    return 0.0f;
+  }
+  
+  // Get velocities in cartesian space
+  std::vector<float> velocityVector = getCurrentVelocityVector();
+  
+  // Calculate magnitude of velocity vector - Euclidean norm
+  float sumOfSquares = 0.0f;
+  for (const float &axisVelocity : velocityVector) {
+    sumOfSquares += axisVelocity * axisVelocity;
+  }
+  
+  return sqrt(sumOfSquares);
+}

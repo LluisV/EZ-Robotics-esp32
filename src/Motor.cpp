@@ -471,3 +471,15 @@ bool Motor::isEndstopTriggered() const
 
   return triggered;
 }
+
+int Motor::getCurrentSpeedSteps() const
+{
+  if (!stepper || !stepper->isRunning()) {
+    return 0;
+  }
+  
+  // Access the actual current speed from the stepper
+  uint32_t currentStepRate = stepper->getCurrentSpeedInMilliHz();
+  
+  return currentStepRate;
+}

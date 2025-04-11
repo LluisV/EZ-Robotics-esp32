@@ -164,6 +164,18 @@
    {
      return configManager;
    }
+
+   /**
+    * @brief Get the current end effector velocity vector
+    * @return Vector of velocities (mm/min) for each axis
+    */
+   std::vector<float> getCurrentVelocityVector() const;
+
+   /**
+    * @brief Get the current end effector scalar velocity
+    * @return Current velocity in mm/min
+    */
+   float getCurrentVelocity() const;
  
  private:
    MotorManager *motorManager;            ///< Motor manager
