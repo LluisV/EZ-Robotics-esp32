@@ -61,19 +61,12 @@ public:
   bool isAnyMotorMoving() const;
 
   /**
-   * @brief Perform rapid (maximum speed) synchronized move of multiple motors
-   * @param positions Array of target positions in user units
-   * @return True if the move was started, false otherwise
-   */
-  bool moveToRapid(const std::vector<float> &positions, float acceleration = 0.0f);
-
-  /**
    * @brief Perform synchronized move of multiple motors at specified feedrate
    * @param positions Array of target positions in user units
    * @param feedrate Feedrate in mm/min
    * @return True if the move was started, false otherwise
    */
-  bool moveToFeedrate(const std::vector<float> &positions, float feedrate, float acceleration = 0.0f);
+  bool moveTo(const std::vector<float> &positions, float feedrate);
 
   /**
    * @brief Stop all motors

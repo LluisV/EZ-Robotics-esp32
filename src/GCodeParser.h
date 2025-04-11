@@ -96,6 +96,9 @@ private:
    * @return True if supported, false otherwise
    */
   bool isMCodeSupported(int code) const;
+
+private:
+  Scheduler* motionPlanner;
 };
 
 #endif // GCODE_PARSER_H

@@ -29,5 +29,23 @@ enum class GCodeParseResult
     QUEUE_FULL = 0,       ///< Motion planner queue is full, retry later
     SUCCESS = 1           ///< Successfully parsed and queued
 };
+
+/**
+ * @brief Structure representing a motion segment
+ */
+struct Segment {
+  std::vector<float> jointPositions;   // Positions in radians/mm
+  std::vector<float> velocities;       // Velocities for each joint
+};
+
+/**
+* @brief Structure representing a planned move
+*/
+struct ScheduledMove {
+  std::vector<float> targetPosition;  // Target position in machine units
+  MovementType type;                  // Type of movement
+  float feedrate;                     // Feedrate in mm/min
+};
+
  
  #endif // COMMON_TYPES_H

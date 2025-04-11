@@ -185,7 +185,7 @@ String CommandProcessor::processInfoCommand(const String &command)
         configStr += "    Type: " + String(motorConfig->type == LINEAR_AXIS ? "Linear" : "Angular") + "\n";
         configStr += "    Steps/Rev: " + String(motorConfig->stepsPerRev) + "\n";
         configStr += "    Max Speed: " + String(motorConfig->maxSpeed) + " steps/sec\n";
-        configStr += "    Acceleration: " + String(motorConfig->acceleration) + " steps/sec²\n";
+        configStr += "    Max Acceleration: " + String(motorConfig->maxAcceleration) + " steps/sec²\n";
         configStr += "    Min Position: " + String(motorConfig->minPosition) + " mm\n";
         configStr += "    Max Position: " + String(motorConfig->maxPosition) + " mm\n";
         configStr += "    Endstop Position: " + String(motorConfig->endstopPosition) + " mm\n";

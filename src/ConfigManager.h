@@ -36,7 +36,7 @@ struct MotorConfig
   AxisType type;         ///< Axis type (LINEAR or ANGULAR)
   int maxSpeed;          ///< Maximum speed in steps/second
   int homeSpeed;         ///< Homing speed in steps/second
-  int acceleration;      ///< Acceleration in steps/second²
+  int maxAcceleration;   ///< Acceleration in steps/second²
   int homingDirection;   ///< 1 or -1
   float backoffDistance; ///< Backoff distance after homing in mm or degrees
   float minPosition;     ///< Minimum allowed position
@@ -54,6 +54,7 @@ struct MachineConfig
   String machineName;      ///< Machine name
   float defaultFeedrate;   ///< Default feedrate in mm/min
   float maxFeedrate;       ///< Maximum feedrate in mm/min
+  float maxAcceleration;   ///< Acceleration in steps/second²
   float junctionDeviation; ///< Junction deviation for path planning
   float arcTolerance;      ///< Arc tolerance in mm
   struct

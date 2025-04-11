@@ -167,7 +167,7 @@ bool ConfigManager::saveConfig()
     motorJson["type"] = motor.type == LINEAR_AXIS ? "LINEAR_AXIS" : "ANGULAR_AXIS";
     motorJson["maxSpeed"] = motor.maxSpeed;
     motorJson["homeSpeed"] = motor.homeSpeed;
-    motorJson["acceleration"] = motor.acceleration;
+    motorJson["maxAcceleration"] = motor.maxAcceleration;
     motorJson["homingDirection"] = motor.homingDirection;
     motorJson["backoffDistance"] = motor.backoffDistance;
     motorJson["minPosition"] = motor.minPosition;
@@ -208,6 +208,7 @@ void ConfigManager::useDefaultConfig()
   machineConfig.machineName = "Default CNC";
   machineConfig.defaultFeedrate = 1000.0; // 1000 mm/min
   machineConfig.maxFeedrate = 5000.0;     // 5000 mm/min
+  machineConfig.maxAcceleration = 8000.0;     // 5000 mm/min
   machineConfig.junctionDeviation = 0.01; // 0.01 mm
   machineConfig.arcTolerance = 0.002;     // 0.002 mm
 
@@ -227,7 +228,7 @@ void ConfigManager::useDefaultConfig()
   xConfig.type = LINEAR_AXIS;
   xConfig.maxSpeed = 12000;
   xConfig.homeSpeed = 1000;
-  xConfig.acceleration = 8000;
+  xConfig.maxAcceleration = 8000;
   xConfig.homingDirection = -1;
   xConfig.backoffDistance = 5.0;
   xConfig.minPosition = 0.0;
@@ -250,7 +251,7 @@ void ConfigManager::useDefaultConfig()
   yConfig.type = LINEAR_AXIS;
   yConfig.maxSpeed = 12000;
   yConfig.homeSpeed = 1000;
-  yConfig.acceleration = 8000;
+  yConfig.maxAcceleration = 8000;
   yConfig.homingDirection = -1;
   yConfig.backoffDistance = 5.0;
   yConfig.minPosition = 0.0;
@@ -273,7 +274,7 @@ void ConfigManager::useDefaultConfig()
   zConfig.type = LINEAR_AXIS;
   zConfig.maxSpeed = 12000;
   zConfig.homeSpeed = 1000;
-  zConfig.acceleration = 8000;
+  zConfig.maxAcceleration = 8000;
   zConfig.homingDirection = -1;
   zConfig.backoffDistance = 5.0;
   zConfig.minPosition = 0.0;
@@ -371,7 +372,7 @@ bool ConfigManager::parseMotorConfig(const JsonObject &json, MotorConfig &config
 
   config.maxSpeed = json["maxSpeed"].is<int>() ? json["maxSpeed"].as<int>() : 5000;
   config.homeSpeed = json["homeSpeed"].is<int>() ? json["homeSpeed"].as<int>() : 1000;
-  config.acceleration = json["acceleration"].is<int>() ? json["acceleration"].as<int>() : 1000;
+  config.maxAcceleration = json["maxAcceleration"].is<int>() ? json["maxAcceleration"].as<int>() : 1000;
   config.homingDirection = json["homingDirection"].is<int>() ? json["homingDirection"].as<int>() : -1;
   config.backoffDistance = json["backoffDistance"].is<float>() ? json["backoffDistance"].as<float>() : 5.0f;
   config.minPosition = json["minPosition"].is<float>() ? json["minPosition"].as<float>() : 0.0f;

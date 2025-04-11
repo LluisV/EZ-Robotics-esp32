@@ -37,7 +37,7 @@ bool Motor::initialize(FastAccelStepperEngine *engine)
   }
 
   stepper->setDirectionPin(config->dirPin);
-  stepper->setAcceleration(config->acceleration);
+  stepper->setAcceleration(100000000);
   stepper->setSpeedInHz(config->maxSpeed);
 
   // Set initial position to home position
@@ -165,7 +165,7 @@ float Motor::stepsToUnits(long steps) const
   return steps * unitsPerStep;
 }
 
-bool Motor::moveTo(long position, float speed, float acceleration)
+bool Motor::moveTo(long position, float speedInHZ)
 {
   if (!stepper || status == HOMING)
   {
@@ -176,10 +176,10 @@ bool Motor::moveTo(long position, float speed, float acceleration)
   }
 
   // Set speed if specified, otherwise use the stored speed
-  if (speed > 0)
+  if (speedInHZ > 0)
   {
-    stepper->setSpeedInHz(speed);
-    Debug::verbose("Motor", "Setting custom speed " + String(speed) +
+    stepper->setSpeedInHz(speedInHZ);
+    Debug::verbose("Motor", "Setting custom speed " + String(speedInHZ) +
                                 " for motor " + config->name);
   }
   else if (currentSpeed > 0)
@@ -195,28 +195,6 @@ bool Motor::moveTo(long position, float speed, float acceleration)
                                 " for motor " + config->name);
   }
 
-  // Set acceleration if necessary
-  if(acceleration > 0)
-  {
-    stepper->setAcceleration(acceleration);
-    Debug::verbose("Motor", "Setting custom acceleration " + String(acceleration) +
-                                " for motor " + config->name);
-  }
-  else if (currentAcceleration > 0)
-  {
-    // In case we haven't set the acceleration since initialization
-    stepper->setAcceleration(currentAcceleration);
-    Debug::verbose("Motor", "Using stored acceleration " + String(currentAcceleration) +
-                                " for motor " + config->name);
-  }
-  else
-  {
-    // Use default acceleration from config
-    stepper->setAcceleration(config->acceleration);
-    Debug::verbose("Motor", "Using default acceleration " + String(config->acceleration) +
-                                " for motor " + config->name);
-  }
-
   // Start the move
   stepper->moveTo(position);
   status = MOVING;
@@ -224,21 +202,21 @@ bool Motor::moveTo(long position, float speed, float acceleration)
   Debug::verbose("Motor", "Moving " + config->name +
                               " to position " + String(position) +
                               " at speed " + String(stepper->getMaxSpeedInMilliHz()) +
-                              ", acceleration " + String(currentAcceleration > 0 ? currentAcceleration : config->acceleration));
+                              ", acceleration " + String(currentAcceleration > 0 ? currentAcceleration : config->maxAcceleration));
 
   return true;
 }
 
 
-bool Motor::moveToUnits(float position, float speed, float acceleration)
+bool Motor::moveToUnits(float position, float speed)
 {
   long steps = unitsToSteps(position);
   int stepsPerSec = speed > 0.0f ? unitsToSteps(speed) : 0;
-  return moveTo(steps, stepsPerSec, acceleration);
+  return moveTo(steps, stepsPerSec);
 }
 
 
-bool Motor::moveRelative(long steps, float speed, float acceleration)
+bool Motor::moveRelative(long steps, float speed)
 {
   if (!stepper || status == HOMING)
   {
@@ -255,14 +233,6 @@ bool Motor::moveRelative(long steps, float speed, float acceleration)
     stepper->setSpeedInHz(config->maxSpeed);
   }
 
-  if(acceleration > 0)
-  {
-    setAcceleration(acceleration);
-  }
-  else
-  {
-    setAcceleration(config->acceleration);
-  }
 
   // Start the move
   stepper->move(steps);
@@ -271,11 +241,11 @@ bool Motor::moveRelative(long steps, float speed, float acceleration)
   return true;
 }
 
-bool Motor::moveRelativeUnits(float units, float speed, float acceleration)
+bool Motor::moveRelativeUnits(float units, float speed)
 {
   long steps = unitsToSteps(units);
   int stepsPerSec = speed > 0.0f ? unitsToSteps(speed) : 0;
-  return moveRelative(steps, stepsPerSec, acceleration);
+  return moveRelative(steps, stepsPerSec);
 }
 
 void Motor::stop(bool immediate)
@@ -306,7 +276,7 @@ bool Motor::isMoving() const
   {
     return false;
   }
-
+  
   return stepper->isRunning();
 }
 

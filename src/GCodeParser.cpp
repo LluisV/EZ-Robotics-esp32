@@ -6,6 +6,7 @@
 #include "GCodeParser.h"
 #include <map>
 #include "Debug.h"
+#include "Scheduler.h"
 
 GCodeParser::GCodeParser(MachineController *machineController)
     : machineController(machineController),
@@ -42,7 +43,6 @@ GCodeParseResult GCodeParser::parse(const String &command)
   if (!validate(trimmedCmd, errorMessage))
   {
     Debug::error("GCodeParser", "Command validation failed: " + errorMessage);
-    Serial.println("Error: " + errorMessage);
     return GCodeParseResult::PARSE_ERROR;
   }
 
@@ -68,7 +68,6 @@ GCodeParseResult GCodeParser::parse(const String &command)
   catch (const std::exception &e)
   {
     Debug::error("GCodeParser", "Parameter parsing error: " + String(e.what()));
-    Serial.println("Error: Parameter parsing failed - " + String(e.what()));
     return GCodeParseResult::PARSE_ERROR;
   }
 
@@ -97,27 +96,23 @@ GCodeParseResult GCodeParser::parse(const String &command)
     else
     {
       Debug::error("GCodeParser", "Unsupported code type: " + String(codeType));
-      Serial.println("Unsupported code type: " + String(codeType));
       return GCodeParseResult::PARSE_ERROR;
     }
   }
   catch (const std::exception &e)
   {
     Debug::error("GCodeParser", "Exception during command execution: " + String(e.what()));
-    Serial.println("Error executing command: " + String(e.what()));
     return GCodeParseResult::PARSE_ERROR;
   }
   catch (...)
   {
     Debug::error("GCodeParser", "Unknown exception during command execution");
-    Serial.println("Unknown error executing command");
     return GCodeParseResult::PARSE_ERROR;
   }
 
   if (!result)
   {
     Debug::warning("GCodeParser", "Failed to execute command: " + command);
-    Serial.println("Failed to execute command: " + command);
     return GCodeParseResult::PARSE_ERROR;
   }
   else
@@ -291,7 +286,6 @@ bool GCodeParser::executeGCode(int code, const std::map<char, float> &params)
     if (!isnan(x) || !isnan(y) || !isnan(z))
     {
       MovementType moveType = (code == 0) ? RAPID_MOVE : LINEAR_MOVE;
-      // Use the motion planner indirectly through MachineController::moveTo
       return machineController->moveTo(x, y, z, f, moveType);
     }
 
@@ -401,7 +395,7 @@ bool GCodeParser::executeGCode(int code, const std::map<char, float> &params)
   }
 
   default:
-    Serial.println("Unsupported G-code: G" + String(code));
+    Debug::error("GCodeParser","Unsupported G-code: G" + String(code));
     return false;
   }
 }
@@ -416,7 +410,6 @@ bool GCodeParser::executeMCode(int code, const std::map<char, float> &params)
 
   case 2:  // M2: Program end
   case 30: // M30: Program end
-    Serial.println("Program completed.");
     return true;
 
   case 112: // M112: Emergency stop
@@ -424,7 +417,7 @@ bool GCodeParser::executeMCode(int code, const std::map<char, float> &params)
     return true;
 
   default:
-    Serial.println("Unsupported M-code: M" + String(code));
+    Debug::error("GCodeParser", "Unsupported M-code: M" + String(code));
     return false;
   }
 }
