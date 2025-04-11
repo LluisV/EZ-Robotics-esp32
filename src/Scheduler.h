@@ -11,12 +11,13 @@ class MachineController;
 
 
 /**
- * @brief Motion scheduler class
+ * @brief Motion scheduler class with velocity look-ahead
  */
 class Scheduler {
 public:
     /**
      * @brief Constructor
+     * @param machineController Reference to machine controller
      * @param motorManager Reference to motor manager
      * @param configManager Reference to config manager
      */
@@ -78,7 +79,7 @@ public:
     bool isFull() const;
 
 private:
-    MachineController* machineController;
+    MachineController* machineController;      // Reference to machine controller
     MotorManager* motorManager;                // Reference to motor manager
     ConfigManager* configManager;              // Reference to config manager
     std::vector<int32_t> currentSteps;         // Current steps for each motor
@@ -86,45 +87,24 @@ private:
     std::deque<Segment> segmentBuffer;         // Buffer of segments
     bool executing;                            // Flag for execution status
 
-    const int MOVE_QUEUE_SIZE = 128;  // Maximum number of moves in queue
-    const int SEGMENT_BUFFER_SIZE = 1024;
-    const float SEGMENT_MAX_LENGTH = 0.25f; // 0.25mm max segment length
-    const float LOOK_AHEAD_DISTANCE = 20; //20mm
-
-
+    const int MOVE_QUEUE_SIZE = 128;           // Maximum number of moves in queue
+    const int SEGMENT_BUFFER_SIZE = 1024;      // Maximum segments in buffer
+    const float SEGMENT_MAX_LENGTH = 0.25f;    // 0.25mm max segment length
+    const float LOOK_AHEAD_DISTANCE = 20.0f;   // 20mm look-ahead distance
     
     /**
      * @brief Generate segments for a move
      * @param move Move to segment
-     * @return Number of segments generated
+     * @return True if segments were generated successfully
      */
     bool generateSegments(ScheduledMove& move);
     
     /**
-     * @brief Calculate move direction vector
-     * @param start Start position
-     * @param end End position
-     * @return Unit vector of direction
+     * @brief Apply velocity adjustments using look-ahead algorithm
+     * Performs forward and backward passes to adjust segment velocities
+     * respecting acceleration and deceleration constraints
      */
-    std::vector<float> calculateDirectionVector(const std::vector<float>& start, 
-                                                const std::vector<float>& end);
-    
-    /**
-     * @brief Calculate dot product of two vectors
-     * @param v1 First vector
-     * @param v2 Second vector
-     * @return Dot product
-     */
-    float dotProduct(const std::vector<float>& v1, const std::vector<float>& v2);
-    
-    /**
-     * @brief Calculate magnitude of direction change
-     * @param prevDir Previous direction
-     * @param newDir New direction
-     * @return Value from 0 (no change) to 1 (180° change)
-     */
-    float calculateDirectionChange(const std::vector<float>& prevDir, 
-                                  const std::vector<float>& newDir);
+    void applyVelocityAdjustments();
     
     /**
      * @brief Execute a segment

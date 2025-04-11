@@ -34,8 +34,12 @@ enum class GCodeParseResult
  * @brief Structure representing a motion segment
  */
 struct Segment {
-  std::vector<float> jointPositions;   // Positions in radians/mm
-  std::vector<float> velocities;       // Velocities for each joint
+  std::vector<float> jointPositions;     // Target positions for each joint (mm)
+  std::vector<float> desiredVelocities;         // Desired velocities for each joint (steps/s)
+  std::vector<float> adjustedVelocities; // Adjusted velocities after look-ahead (steps/s)
+  float distance;                        // Segment distance (mm)
+  float forwardVelocity;                 // Temporary storage for forward pass calculation (mm/s)
+  float adjustedVelocity;                // Final scalar velocity after adjustment (mm/s)
 };
 
 /**
