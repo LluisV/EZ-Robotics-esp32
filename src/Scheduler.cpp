@@ -258,9 +258,6 @@ bool Scheduler::generateSegments(ScheduledMove &move)
     }
     else if (numSegments > availableSpace)
     {
-        // Not enough space and buffer not empty
-        Debug::error("Scheduler", "Cannot fit segments: need " + 
-                    String(numSegments) + ", have " + String(availableSpace));
         return false;
     }
 

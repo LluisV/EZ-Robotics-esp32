@@ -961,6 +961,10 @@ void CommunicationManager::sendPositionTelemetry(bool force)
   std::vector<float> workPosition = machineController->getCurrentWorkPosition();
   std::vector<float> worldPosition = machineController->getCurrentWorldPosition();
 
+  // Get current velocity (scalar and vector)
+  float currentVelocity = machineController->getCurrentVelocity();
+  std::vector<float> velocityVector = machineController->getCurrentVelocityVector();
+
   // Only send if position has changed or force is true
   if (force ||
       lastReportedPosition.empty() ||
@@ -988,6 +992,22 @@ void CommunicationManager::sendPositionTelemetry(bool force)
       telemetryMsg += "\"Z\":" + String(worldPosition[2], 3);
     }
 
+    telemetryMsg += "},";
+    
+    // Add scalar velocity information
+    telemetryMsg += "\"velocity\":" + String(currentVelocity, 3) + ",";
+    
+    // Add velocity vector
+    telemetryMsg += "\"velocityVector\":{";
+    
+    // Make sure we have at least 3 axes
+    if (velocityVector.size() >= 3)
+    {
+      telemetryMsg += "\"X\":" + String(velocityVector[0], 3) + ",";
+      telemetryMsg += "\"Y\":" + String(velocityVector[1], 3) + ",";
+      telemetryMsg += "\"Z\":" + String(velocityVector[2], 3);
+    }
+    
     telemetryMsg += "}}";
 
     // Send the message
