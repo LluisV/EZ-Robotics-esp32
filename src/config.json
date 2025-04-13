@@ -5,7 +5,7 @@
       "maxFeedrate": 5000.0,
       "junctionDeviation": 0.05,
       "arcTolerance": 0.002,
-      "maxAcceleration": 8000,
+      "maxAcceleration": 10,
       "telemetry": {
         "enabled": true,
         "updatePositionFrequency": 10

@@ -38,8 +38,6 @@ struct Segment {
   std::vector<float> desiredVelocities;         // Desired velocities for each joint (steps/s)
   std::vector<float> adjustedVelocities; // Adjusted velocities after look-ahead (steps/s)
   float distance;                        // Segment distance (mm)
-  float forwardVelocity;                 // Temporary storage for forward pass calculation (mm/s)
-  float adjustedVelocity;                // Final scalar velocity after adjustment (mm/s)
 };
 
 /**

@@ -6,8 +6,7 @@
 Scheduler::Scheduler(MachineController *machineController, MotorManager *motorManager, ConfigManager *configManager)
     : machineController(machineController),
       motorManager(motorManager),
-      configManager(configManager),
-      executing(false)
+      configManager(configManager)
 {
     // Initialize position vectors
     if (motorManager)
@@ -97,20 +96,12 @@ void Scheduler::processQueue()
     if (moveQueue.empty())
         return;
 
-    // Process any unprocessed moves in queue
-    for (auto &move : moveQueue)
-    {
-        // Generate segments for this move
-        bool segmentsGenerated = generateSegments(move);
-        if (segmentsGenerated)
-        {
-            // Apply velocity adjustments after generating segments
-            applyVelocityAdjustments();
-            moveQueue.pop_front();
-        }
+    auto &move = moveQueue.front();
 
-        // Only process one move at a time to avoid filling buffer
-        break;
+    if (generateSegments(move))
+    {
+        moveQueue.pop_front();
+        Debug::warning("Scheduler", "Move segmented. Total segments: " + String(segmentBuffer.size()));
     }
 }
 
@@ -123,91 +114,100 @@ void Scheduler::applyVelocityAdjustments()
     float maxAcceleration = config.maxAcceleration; // mm/s^2
     int numMotors = motorManager->getNumMotors();
 
-    // Calculate how many segments correspond to look-ahead distance
-    float totalDistance = 0.0f;
-    int lookAheadSegments = 0;
-    
-    for (size_t i = 0; i < segmentBuffer.size(); i++)
-    {
-        totalDistance += segmentBuffer[i].distance;
-        lookAheadSegments++;
-        if (totalDistance >= LOOK_AHEAD_DISTANCE)
-            break;
-    }
-
     // Get current machine velocity
     float currentVelocity = 0.0f;
     if (machineController)
     {
-        // Use the scalar velocity method
         currentVelocity = machineController->getCurrentVelocity();
-        
-        // If needed, we could also access the full velocity vector
-        // std::vector<float> currentVelocityVector = machineController->getCurrentVelocityVector();
     }
 
     // Forward pass (acceleration constraint)
     for (size_t i = 0; i < segmentBuffer.size(); i++)
     {
         Segment &segment = segmentBuffer[i];
-        
-        // Find limiting axis and its velocity
-        float maxDesiredVelocity = 0.0f;
+
+        // Find the maximum desired velocity in mm/s across all motors
+        float maxDesiredVelocity_mm_s = 0.0f;
+        int maxVelocityIndex = 0;
         for (int j = 0; j < numMotors; j++)
         {
-            if (segment.desiredVelocities[j] > maxDesiredVelocity)
-                maxDesiredVelocity = segment.desiredVelocities[j];
+            Motor *motor = motorManager->getMotor(j);
+            if (!motor) continue;
+
+            float stepsPerUnit = abs(motor->unitsToSteps(1)); // steps/mm or steps/deg
+            if (stepsPerUnit == 0.0f) continue;
+
+            float velocity_mm_s = segment.desiredVelocities[j] / stepsPerUnit;
+            if (velocity_mm_s > maxDesiredVelocity_mm_s)
+            {
+                maxVelocityIndex = j;
+                maxDesiredVelocity_mm_s = velocity_mm_s;
+            }
         }
-        
-        // Convert to mm/s using motor 0 as reference (assuming uniform step/mm)
-        Motor *referenceMotor = motorManager->getMotor(0);
-        float stepsPerUnit = (referenceMotor) ? abs(referenceMotor->unitsToSteps(1)) : 1.0f;
-        float desiredVelocity = maxDesiredVelocity / stepsPerUnit;
-        
+
         // Apply acceleration constraint
-        float maxPossibleVelocity = sqrtf(currentVelocity * currentVelocity + 
-                                         2.0f * maxAcceleration * segment.distance);
-        
-        // Limit velocity by acceleration constraint
-        float forwardVelocity = std::min(desiredVelocity, maxPossibleVelocity);
-        
-        // Store for backward pass
-        segment.forwardVelocity = forwardVelocity;
-        
-        // Update current velocity for next segment
+        float maxPossibleVelocity = sqrtf(currentVelocity * currentVelocity +
+                                          2.0f * maxAcceleration * segment.distance);
+
+        float forwardVelocity = std::min(maxDesiredVelocity_mm_s, maxPossibleVelocity);
         currentVelocity = forwardVelocity;
+
+        // Store this for backward pass
+        segment.adjustedVelocities.resize(numMotors);
+        for (int j = 0; j < numMotors; j++)
+        {
+            // Just store calculated forward velocities temporarily
+            segment.adjustedVelocities[j] = segment.desiredVelocities[j] * 
+                                          (forwardVelocity / maxDesiredVelocity_mm_s);
+        }
     }
-    
+
     // Backward pass (deceleration constraint)
-    // Start with zero final velocity or connect to existing adjusted segments
-    currentVelocity = 0.0f;
-    
+    float exitVelocity = 0.0f; // Final velocity should be zero
     for (int i = segmentBuffer.size() - 1; i >= 0; i--)
     {
         Segment &segment = segmentBuffer[i];
-        
-        // Apply deceleration constraint
-        float maxPossibleVelocity = sqrtf(currentVelocity * currentVelocity + 
-                                         2.0f * maxAcceleration * segment.distance);
-        
-        // Final velocity is minimum of forward-calculated and backward-calculated
-        segment.adjustedVelocity = std::min(segment.forwardVelocity, maxPossibleVelocity);
-        
-        // Update current velocity for previous segment
-        currentVelocity = segment.adjustedVelocity;
-        
-        // Scale individual axis velocities proportionally
-        float scaleFactor = (segment.forwardVelocity > 0.001f) ? 
-                           (segment.adjustedVelocity / segment.forwardVelocity) : 0.0f;
-                           
+
+        // Find the maximum forward-pass velocity across all motors
+        float maxForwardVelocity_mm_s = 0.0f;
+        int maxVelocityIndex = 0;
         for (int j = 0; j < numMotors; j++)
         {
-            segment.adjustedVelocities[j] = segment.desiredVelocities[j] * scaleFactor;
+            Motor *motor = motorManager->getMotor(j);
+            if (!motor) continue;
+
+            float stepsPerUnit = abs(motor->unitsToSteps(1)); // steps/mm or steps/deg
+            if (stepsPerUnit == 0.0f) continue;
+
+            float velocity_mm_s = segment.adjustedVelocities[j] / stepsPerUnit;
+            if (velocity_mm_s > maxForwardVelocity_mm_s)
+            {
+                maxVelocityIndex = j;
+                maxForwardVelocity_mm_s = velocity_mm_s;
+            }
+        }
+
+        // Apply deceleration constraint (how fast we can go and still decelerate to exit velocity)
+        float maxPossibleVelocity = sqrtf(exitVelocity * exitVelocity +
+                                         2.0f * maxAcceleration * segment.distance);
+
+        // Take minimum of forward-calculated velocity and backward-calculated velocity
+        float finalVelocity = std::min(maxForwardVelocity_mm_s, maxPossibleVelocity);
+        exitVelocity = finalVelocity; // For next segment
+
+        // Calculate scaling factor for all joint velocities
+        float scaleFactor = (maxForwardVelocity_mm_s > 0.0f) ?
+                           (finalVelocity / maxForwardVelocity_mm_s) : 0.0f;
+
+        // Apply the scaling factor to all joints
+        for (int j = 0; j < numMotors; j++)
+        {
+            segment.adjustedVelocities[j] *= scaleFactor;
         }
     }
-    
-    Debug::verbose("Scheduler", "Applied velocity adjustments to " + 
-                  String(segmentBuffer.size()) + " segments");
+
+    Debug::verbose("Scheduler", "Applied velocity adjustments to " +
+                   String(segmentBuffer.size()) + " segments");
 }
 
 bool Scheduler::generateSegments(ScheduledMove &move)
@@ -239,17 +239,29 @@ bool Scheduler::generateSegments(ScheduledMove &move)
     }
     float totalDistance = sqrt(totalDistanceSquared);
     
-    // Determine number of segments
+    // Calculate initial number of segments using default max length
     int numSegments = std::max(1, (int)ceil(totalDistance / SEGMENT_MAX_LENGTH));
     
     // Check available buffer space
     int availableSpace = SEGMENT_BUFFER_SIZE - segmentBuffer.size();
-    if (numSegments > availableSpace)
+    
+    // If segments won't fit but buffer is empty, adapt segment size
+    if (numSegments > availableSpace && segmentBuffer.empty())
     {
-        Debug::warning("Scheduler", "Segment buffer limited");
+        // Recalculate segment size to fit within available buffer
+        float adaptedSegmentLength = totalDistance / availableSpace;
         numSegments = availableSpace;
-        if (numSegments <= 0)
-            return false;
+        
+        Debug::warning("Scheduler", "Adapting segment size from " + 
+                      String(SEGMENT_MAX_LENGTH, 2) + " to " + 
+                      String(adaptedSegmentLength, 2) + " mm for long move");
+    }
+    else if (numSegments > availableSpace)
+    {
+        // Not enough space and buffer not empty
+        Debug::error("Scheduler", "Cannot fit segments: need " + 
+                    String(numSegments) + ", have " + String(availableSpace));
+        return false;
     }
 
     // Base velocity (mm/s)
@@ -267,8 +279,6 @@ bool Scheduler::generateSegments(ScheduledMove &move)
         segment.desiredVelocities.resize(numMotors);
         segment.adjustedVelocities.resize(numMotors);
         segment.distance = totalDistance / numSegments;
-        segment.forwardVelocity = 0.0f;
-        segment.adjustedVelocity = 0.0f;
 
         // Interpolated positions
         for (int i = 0; i < numMotors; i++)
@@ -287,8 +297,6 @@ bool Scheduler::generateSegments(ScheduledMove &move)
                 // Convert to steps/s
                 float stepsPerUnit = abs(motor->unitsToSteps(1));
                 segment.desiredVelocities[i] = axisVelocity * stepsPerUnit;
-                
-                // Initialize adjusted velocity to desired velocity
                 segment.adjustedVelocities[i] = segment.desiredVelocities[i];
             }
             else
@@ -300,6 +308,8 @@ bool Scheduler::generateSegments(ScheduledMove &move)
         // Add to buffer
         segmentBuffer.push_back(segment);
     }
+
+    applyVelocityAdjustments(); 
 
     return true;
 }
@@ -352,20 +362,15 @@ bool Scheduler::executeSegment(const Segment &segment)
 
 bool Scheduler::executeNextSegment()
 {
-    // Update execution status first
-    updateExecutionStatus();
-
     // If we're currently executing a segment, don't start a new one
-    if (executing)
+    if (motorManager->isAnyMotorMoving())
     {
         return false;
     }
 
-    // Process the queue to generate segments if needed
-    if (segmentBuffer.empty())
-    {
-        processQueue();
-    }
+    // Process the moves queue to generate segments if needed
+    processQueue();
+    
 
     // If we have segments, execute the next one
     if (!segmentBuffer.empty())
@@ -375,46 +380,24 @@ bool Scheduler::executeNextSegment()
 
         // If execution was successful, mark as executing and pop from buffer
         if (result)
-        {
-            executing = true;
             segmentBuffer.pop_front();
-            return true;
-        }
+
+        return result;
     }
 
     return false;
-}
-
-bool Scheduler::updateExecutionStatus()
-{
-    // If not executing, nothing to update
-    if (!executing)
-    {
-        return false;
-    }
-
-    // Check if motors are still moving
-    if (motorManager->isAnyMotorMoving())
-    {
-        return false; // Still executing
-    }
-
-    // All motors have stopped - segment complete
-    executing = false;
-    return true;
 }
 
 void Scheduler::clear()
 {
     moveQueue.clear();
     segmentBuffer.clear();
-    executing = false;
     Debug::info("Scheduler", "All queues cleared");
 }
 
 bool Scheduler::hasMove() const
 {
-    return !moveQueue.empty() || !segmentBuffer.empty();
+    return !moveQueue.empty();
 }
 
 bool Scheduler::isFull() const

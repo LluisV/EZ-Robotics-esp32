@@ -169,6 +169,7 @@ String CommandProcessor::processInfoCommand(const String &command)
     configStr += "  Name: " + machineConfig.machineName + "\n";
     configStr += "  Default Feedrate: " + String(machineConfig.defaultFeedrate) + " mm/min\n";
     configStr += "  Max Feedrate: " + String(machineConfig.maxFeedrate) + " mm/min\n";
+    configStr += "  Max Acceleration: " + String(machineConfig.maxAcceleration) + " mm/s^2\n";
     configStr += "  Junction Deviation: " + String(machineConfig.junctionDeviation, 4) + " mm\n";
     configStr += "  Arc Tolerance: " + String(machineConfig.arcTolerance, 4) + " mm\n\n";
 

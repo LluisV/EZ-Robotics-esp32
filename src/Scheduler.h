@@ -85,12 +85,10 @@ private:
     std::vector<int32_t> currentSteps;         // Current steps for each motor
     std::deque<ScheduledMove> moveQueue;       // Queue of planned moves
     std::deque<Segment> segmentBuffer;         // Buffer of segments
-    bool executing;                            // Flag for execution status
 
     const int MOVE_QUEUE_SIZE = 128;           // Maximum number of moves in queue
-    const int SEGMENT_BUFFER_SIZE = 1024;      // Maximum segments in buffer
+    const int SEGMENT_BUFFER_SIZE = 1000;      // Maximum segments in buffer
     const float SEGMENT_MAX_LENGTH = 0.25f;    // 0.25mm max segment length
-    const float LOOK_AHEAD_DISTANCE = 20.0f;   // 20mm look-ahead distance
     
     /**
      * @brief Generate segments for a move
@@ -112,12 +110,7 @@ private:
      * @return True if execution started
      */
     bool executeSegment(const Segment& segment);
-    
-    /**
-     * @brief Update execution status
-     * @return True if status changed
-     */
-    bool updateExecutionStatus();
+
 };
 
 #endif // SCHEDULER_H

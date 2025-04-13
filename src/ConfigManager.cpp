@@ -208,7 +208,7 @@ void ConfigManager::useDefaultConfig()
   machineConfig.machineName = "Default CNC";
   machineConfig.defaultFeedrate = 1000.0; // 1000 mm/min
   machineConfig.maxFeedrate = 5000.0;     // 5000 mm/min
-  machineConfig.maxAcceleration = 8000.0;     // 5000 mm/min
+  machineConfig.maxAcceleration = 10.0;     // 10 mm/s^2
   machineConfig.junctionDeviation = 0.01; // 0.01 mm
   machineConfig.arcTolerance = 0.002;     // 0.002 mm
 

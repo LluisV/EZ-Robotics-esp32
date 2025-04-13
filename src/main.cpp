@@ -53,7 +53,7 @@
    delay(500);
  
    unsigned long lastTelemetryTime = 0;
-   unsigned long telemetryInterval = 100; // Default to 10 Hz, will be updated by config
+   unsigned long telemetryInterval = 50; // Default to 20 Hz, will be updated by config
  
    // Get telemetry settings from configuration
    if (communicationManager && communicationManager->getTelemetryFrequency() > 0)
@@ -84,7 +84,7 @@
          // Check if it's time for a telemetry update
          if (currentTime - lastTelemetryTime >= telemetryInterval)
          {
-           communicationManager->sendPositionTelemetry(false);
+           communicationManager->sendPositionTelemetry(true);
            // Update last telemetry time
            lastTelemetryTime = currentTime;
          }
@@ -146,22 +146,13 @@
     try
     {
       // Process segments from the scheduler
-      if (machineController && scheduler) { 
-        // Process more moves into segments if buffer is getting low
-        if (scheduler->hasMove()) {
-          scheduler->processQueue();
-          
-          // Execute the next segment if motors are idle
-          if (scheduler->executeNextSegment()) {
-            Debug::verbose("MotionTask", "Executed segment from scheduler");
-          }
-        }
+      if (scheduler) { 
+        // Execute the next movement segment
+        scheduler->executeNextSegment();
       }
 
       // Process commands from queue when not waiting for motion to complete
-      if (machineController && gCodeParser && commandQueue && !commandQueue->isEmpty() && 
-          !motorManager.isAnyMotorMoving() && 
-          (!scheduler || !scheduler->hasMove()))
+      if (machineController && gCodeParser && commandQueue && !commandQueue->isEmpty())
       {
         // First check for immediate commands
         String immediateCmd = commandQueue->getNextImmediate();
