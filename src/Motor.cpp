@@ -478,8 +478,11 @@ int Motor::getCurrentSpeedSteps() const
     return 0;
   }
   
-  // Access the actual current speed from the stepper
-  uint32_t currentStepRate = stepper->getCurrentSpeedInMilliHz();
+  // Get speed in milliHz (steps per 1000 seconds)
+  uint32_t currentSpeedInMilliHz = stepper->getCurrentSpeedInMilliHz();
   
-  return currentStepRate;
+  // Convert from milliHz to Hz (steps per second)
+  float speedInStepsPerSec = currentSpeedInMilliHz / 1000.0f;
+  
+  return speedInStepsPerSec;
 }

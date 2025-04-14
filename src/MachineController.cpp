@@ -619,14 +619,14 @@
    }
    
    int numMotors = motorManager->getNumMotors();
-   std::vector<float> motorVelocities(numMotors, 0.0f);
+   velocityVector.resize(numMotors, 0.0f);
    
-   // Step 1: Get the current velocities of all motors in their native units
+   // Get the current velocities of all motors in their native units
    for (int i = 0; i < numMotors; i++) {
      Motor *motor = motorManager->getMotor(i);
      if (motor && motor->isMoving()) {
-       // Get motor speed in steps/sec
-       int currentSpeedSteps = motor->getCurrentSpeedSteps();
+       // Get motor speed in steps/sec (already converted in getCurrentSpeedSteps)
+       float currentSpeedSteps = motor->getCurrentSpeedSteps();
        
        // Convert from steps/sec to units/sec (mm/sec or deg/sec)
        float unitsPerStep = motor->stepsToUnits(1) - motor->stepsToUnits(0);
@@ -635,30 +635,18 @@
        // Convert from units/sec to units/min (mm/min or deg/min)
        float speedInUnitsPerMin = speedInUnitsPerSec * 60.0f;
        
-       motorVelocities[i] = speedInUnitsPerMin;
+       velocityVector[i] = speedInUnitsPerMin;
      }
    }
    
-   // Step 2: Apply kinematics to convert motor velocities to end effector velocities
-   // This requires the specific kinematics model of the machine
-   
+   // Apply kinematics if needed (left as-is)
    if (kinematics) {
-     // If we have a kinematics model, use it to transform motor velocities
-     // to end effector velocities. This is the proper way to handle non-Cartesian
-     // machines or machines with complex kinematics.
-     
-     // NOTE: This requires the kinematics model to implement a method for 
-     // velocity transformation, which isn't currently defined in the Kinematics class.
-     // velocityVector = kinematics->transformVelocity(motorVelocities);
-     
-     // For now, we'll just pass through the motor velocities
-     velocityVector = motorVelocities;
+     // For now, just pass through motor velocities
+     return velocityVector;
    } else {
-     // Default case - assume Cartesian kinematics (simple 1:1 mapping)
-     velocityVector = motorVelocities;
+     // Default case - assume Cartesian kinematics
+     return velocityVector;
    }
-   
-   return velocityVector;
 }
 
 
