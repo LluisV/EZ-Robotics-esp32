@@ -213,7 +213,7 @@ void ConfigManager::useDefaultConfig()
   machineConfig.arcTolerance = 0.002;     // 0.002 mm
 
   machineConfig.telemetry.enabled = true;               // Enable telemetry by default
-  machineConfig.telemetry.updatePositionFrequency = 10; // 10 Hz update rate
+  machineConfig.telemetry.updatePositionFrequency = 20; // 10 Hz update rate
 
   // Setup default X axis
   MotorConfig xConfig;

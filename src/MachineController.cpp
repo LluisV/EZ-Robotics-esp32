@@ -611,7 +611,7 @@
  }
 
  std::vector<float> MachineController::getCurrentVelocityVector() const
- {
+{
    std::vector<float> velocityVector;
    
    if (!motorManager) {
@@ -632,7 +632,10 @@
        float unitsPerStep = motor->stepsToUnits(1) - motor->stepsToUnits(0);
        float speedInUnitsPerSec = currentSpeedSteps * unitsPerStep;
        
-       motorVelocities[i] = speedInUnitsPerSec;
+       // Convert from units/sec to units/min (mm/min or deg/min)
+       float speedInUnitsPerMin = speedInUnitsPerSec * 60.0f;
+       
+       motorVelocities[i] = speedInUnitsPerMin;
      }
    }
    
@@ -665,7 +668,7 @@ float MachineController::getCurrentVelocity() const
     return 0.0f;
   }
   
-  // Get velocities in cartesian space
+  // Get velocities in cartesian space (already in mm/min after the modification above)
   std::vector<float> velocityVector = getCurrentVelocityVector();
   
   // Calculate magnitude of velocity vector - Euclidean norm
