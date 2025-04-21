@@ -47,7 +47,12 @@ struct ScheduledMove {
   std::vector<float> targetPosition;  // Target position in machine units
   MovementType type;                  // Type of movement
   float feedrate;                     // Feedrate in mm/min
+  
+  float segmentationProgress;        // Progress of segmentation (0.0 to 1.0)
+  int totalSegments;                 // Total number of segments for this move
+  float totalDistance;               // Total distance of the move
+  std::vector<float> startPosition;  // Start position of the move
+  std::vector<float> moveVector;     // Movement vector from start to end
 };
-
  
  #endif // COMMON_TYPES_H

@@ -148,7 +148,7 @@ private:
   unsigned long lastTelemetryTime = 0;     ///< Time of last telemetry update
   std::vector<float> lastReportedPosition; ///< Last reported position
   bool telemetryEnabled = true;            ///< Telemetry global enable flag
-  int telemetryFrequency = 10;             ///< Telemetry update frequency in Hz
+  int telemetryFrequency = 30;             ///< Telemetry update frequency in Hz
 
   /**
    * @brief Handle receiving binary data for a file transfer

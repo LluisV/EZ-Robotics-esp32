@@ -176,6 +176,21 @@
     * @return Current velocity in mm/min
     */
    float getCurrentVelocity() const;
+
+    /**
+    * @brief Get the current end effector desired velocity vector
+    * @return Vector of velocities (mm/min) for each axis
+    */
+   std::vector<float> getCurrentDesiredVelocityVector() const;
+
+   /**
+    * @brief Get the current end effector desired scalar velocity
+    * @return Current velocity in mm/min
+    */
+   float getCurrentDesiredVelocity() const;
+
+
+   void setCurrentDesiredVelocityVector(std::vector<float>);
  
  private:
    MotorManager *motorManager;            ///< Motor manager
@@ -184,7 +199,8 @@
    float currentFeedrate;                 ///< Current feedrate in mm/min
    bool absoluteMode;                     ///< True if in absolute mode, false if in relative mode
    Scheduler *motionPlanner; ///< Segmented motion planner
- 
+   std::vector<float> desiredVelocityVector; 
+
    /**
     * @brief Convert machine coordinates to motor positions
     * @param machinePos Machine position

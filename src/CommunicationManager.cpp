@@ -7,8 +7,8 @@
 #include "MachineController.h"
 #include <SPIFFS.h>
 
-// Timeout for file transfers in milliseconds (30 seconds)
-#define FILE_TRANSFER_TIMEOUT 30000
+// Timeout for file transfers in milliseconds (5 seconds)
+#define FILE_TRANSFER_TIMEOUT 5000
 
 // Maximum time between progress updates in milliseconds (1 second)
 #define PROGRESS_UPDATE_INTERVAL 1000
@@ -962,8 +962,8 @@ void CommunicationManager::sendPositionTelemetry(bool force)
   std::vector<float> worldPosition = machineController->getCurrentWorldPosition();
 
   // Get current velocity (scalar and vector)
-  float currentVelocity = machineController->getCurrentVelocity();
-  std::vector<float> velocityVector = machineController->getCurrentVelocityVector();
+  float currentVelocity = machineController->getCurrentDesiredVelocity();
+  std::vector<float> velocityVector = machineController->getCurrentDesiredVelocityVector();
 
   // Only send if position has changed or force is true
   if (force ||

@@ -206,10 +206,10 @@ void ConfigManager::useDefaultConfig()
 
   // Setup default machine configuration
   machineConfig.machineName = "Default CNC";
-  machineConfig.defaultFeedrate = 1000.0; // 1000 mm/min
-  machineConfig.maxFeedrate = 5000.0;     // 5000 mm/min
-  machineConfig.maxAcceleration = 10.0;     // 10 mm/s^2
-  machineConfig.junctionDeviation = 0.01; // 0.01 mm
+  machineConfig.defaultFeedrate = 1000.0; //  mm/min
+  machineConfig.maxFeedrate = 5000.0;     //  mm/min
+  machineConfig.maxAcceleration = 30.0;     // mm/s^2
+  machineConfig.junctionDeviation = 0.05; // 0.01 mm
   machineConfig.arcTolerance = 0.002;     // 0.002 mm
 
   machineConfig.telemetry.enabled = true;               // Enable telemetry by default

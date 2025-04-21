@@ -11,7 +11,7 @@ class MachineController;
 
 
 /**
- * @brief Motion scheduler class with velocity look-ahead
+ * @brief Motion scheduler class with velocity look-ahead and progressive segmentation
  */
 class Scheduler {
 public:
@@ -45,7 +45,7 @@ public:
     bool addRapidMove(const std::vector<float>& targetPos);
     
     /**
-     * @brief Process moves and generate segments
+     * @brief Process moves and generate segments progressively
      */
     void processQueue();
     
@@ -65,12 +65,6 @@ public:
      * @return True if there are moves or segments
      */
     bool hasMove() const;
-    
-    /**
-     * @brief Set current position
-     * @param position Current position
-     */
-    void setCurrentPosition(const std::vector<float>& position);
 
     /**
      * @brief Check if the scheduler queue is full
@@ -87,15 +81,17 @@ private:
     std::deque<Segment> segmentBuffer;         // Buffer of segments
 
     const int MOVE_QUEUE_SIZE = 128;           // Maximum number of moves in queue
-    const int SEGMENT_BUFFER_SIZE = 1024;      // Maximum segments in buffer
-    const float SEGMENT_MAX_LENGTH = 0.5f;    // 0.5mm max segment length
+    const int SEGMENT_BUFFER_SIZE = 1000;       // Maximum segments in buffer
+    const float SEGMENT_MAX_LENGTH = 0.15f;     // 0.15mm max segment length
+    const float SEGMENT_BUFFER_THRESHOLD = 0.5f;   // When to start generating more segments (50%)
+    
     
     /**
-     * @brief Generate segments for a move
+     * @brief Generate segments progressively for a move
      * @param move Move to segment
      * @return True if segments were generated successfully
      */
-    bool generateSegments(ScheduledMove& move);
+    bool generateSegmentsProgressive(ScheduledMove& move);
     
     /**
      * @brief Apply velocity adjustments using look-ahead algorithm
@@ -110,7 +106,6 @@ private:
      * @return True if execution started
      */
     bool executeSegment(const Segment& segment);
-
 };
 
 #endif // SCHEDULER_H

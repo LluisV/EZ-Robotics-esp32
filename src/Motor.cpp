@@ -14,7 +14,8 @@ Motor::Motor(const MotorConfig *config)
       homingStartPosition(0),
       lastEndstopCheckTime(0),
       homingPhase(0),
-      currentSpeed(0)
+      currentSpeed(0),
+      currentAcceleration(0)
 {
 }
 
@@ -37,7 +38,8 @@ bool Motor::initialize(FastAccelStepperEngine *engine)
   }
 
   stepper->setDirectionPin(config->dirPin);
-  stepper->setAcceleration(100000000);
+  stepper->setAcceleration(1410065408);
+  stepper->setLinearAcceleration(0);
   stepper->setSpeedInHz(config->maxSpeed);
 
   // Set initial position to home position
@@ -196,6 +198,9 @@ bool Motor::moveTo(long position, float speedInHZ)
   }
 
   // Start the move
+  long currentPosition = stepper->getCurrentPosition();
+  long delta = position - currentPosition;
+
   stepper->moveTo(position);
   status = MOVING;
 
@@ -477,12 +482,12 @@ int Motor::getCurrentSpeedSteps() const
   if (!stepper || !stepper->isRunning()) {
     return 0;
   }
-  
+
   // Get speed in milliHz (steps per 1000 seconds)
-  uint32_t currentSpeedInMilliHz = stepper->getCurrentSpeedInMilliHz();
-  
+  int32_t currentSpeedInMilliHz = stepper->getCurrentSpeedInMilliHz();
+
   // Convert from milliHz to Hz (steps per second)
   float speedInStepsPerSec = currentSpeedInMilliHz / 1000.0f;
-  
-  return speedInStepsPerSec;
+
+  return static_cast<int>(speedInStepsPerSec );
 }

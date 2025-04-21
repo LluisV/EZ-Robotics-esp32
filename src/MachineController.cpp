@@ -19,6 +19,7 @@
    // Initialize work offset to zero
    if (motorManager) {
      workOffset.resize(motorManager->getNumMotors(), 0.0f);
+     desiredVelocityVector.resize(motorManager->getNumMotors(), 0.0f);
    }
  }
  
@@ -629,7 +630,7 @@
        float currentSpeedSteps = motor->getCurrentSpeedSteps();
        
        // Convert from steps/sec to units/sec (mm/sec or deg/sec)
-       float unitsPerStep = motor->stepsToUnits(1) - motor->stepsToUnits(0);
+       float unitsPerStep = motor->stepsToUnits(1);
        float speedInUnitsPerSec = currentSpeedSteps * unitsPerStep;
        
        // Convert from units/sec to units/min (mm/min or deg/min)
@@ -638,7 +639,7 @@
        velocityVector[i] = speedInUnitsPerMin;
      }
    }
-   
+
    // Apply kinematics if needed (left as-is)
    if (kinematics) {
      // For now, just pass through motor velocities
@@ -649,8 +650,7 @@
    }
 }
 
-
-float MachineController::getCurrentVelocity() const
+ float MachineController::getCurrentVelocity() const
 {
   if (!isMoving()) {
     return 0.0f;
@@ -658,6 +658,32 @@ float MachineController::getCurrentVelocity() const
   
   // Get velocities in cartesian space (already in mm/min after the modification above)
   std::vector<float> velocityVector = getCurrentVelocityVector();
+  
+  // Calculate magnitude of velocity vector - Euclidean norm
+  float sumOfSquares = 0.0f;
+  for (const float &axisVelocity : velocityVector) {
+    sumOfSquares += axisVelocity * axisVelocity;
+  }
+  
+  return sqrt(sumOfSquares);
+}
+
+void MachineController::setCurrentDesiredVelocityVector(std::vector<float> velocities)
+{
+  desiredVelocityVector = velocities;
+}
+
+
+std::vector<float> MachineController::getCurrentDesiredVelocityVector() const
+{
+   return desiredVelocityVector;
+}
+
+ float MachineController::getCurrentDesiredVelocity() const
+{
+  
+  // Get velocities in cartesian space (already in mm/min after the modification above)
+  std::vector<float> velocityVector = getCurrentDesiredVelocityVector();
   
   // Calculate magnitude of velocity vector - Euclidean norm
   float sumOfSquares = 0.0f;
