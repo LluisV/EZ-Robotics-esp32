@@ -107,98 +107,176 @@ void Scheduler::applyVelocityAdjustments()
         return;
 
     const MachineConfig &config = configManager->getMachineConfig();
-    float maxAcceleration_mm_min2 = config.maxAcceleration * 60.0f * 60.0f; // mm/min^2
     int numMotors = motorManager->getNumMotors();
 
-    // Get current machine velocity
-    float currentVelocity_mm_min = 0.0f;
+    // Get current machine velocity vector
+    std::vector<float> currentVelocityVector_mm_min(numMotors, 0.0f);
     if (machineController)
     {
-        currentVelocity_mm_min = machineController->getCurrentDesiredVelocity();
-        Serial.println("Current velocity: " + String(currentVelocity_mm_min));
+        currentVelocityVector_mm_min = machineController->getCurrentDesiredVelocityVector();
     }
+    
+    // Calculate current velocity magnitude
+    float currentVelocityMagnitude_mm_min = 0.0f;
+    for (float v : currentVelocityVector_mm_min)
+    {
+        currentVelocityMagnitude_mm_min += v * v;
+    }
+    currentVelocityMagnitude_mm_min = sqrt(currentVelocityMagnitude_mm_min);
 
     // Forward pass (acceleration constraint)
     for (size_t i = 0; i < segmentBuffer.size(); i++)
     {
         Segment &segment = segmentBuffer[i];
-
-        // Find the maximum desired velocity in mm/min across all motors
-        float maxDesiredVelocity_mm_min = 0.0f;
-        int maxVelocityIndex = 0;
+        
+        // Calculate per-axis velocities in mm/min
+        std::vector<float> desiredVelocities_mm_min(numMotors, 0.0f);
+        std::vector<float> axisAccelerationLimits_mm_min2(numMotors, 0.0f);
+        
         for (int j = 0; j < numMotors; j++)
         {
             Motor *motor = motorManager->getMotor(j);
             if (!motor) continue;
-
+            
             float stepsPerUnit = abs(motor->unitsToSteps(1)); // steps/mm or steps/deg
             if (stepsPerUnit == 0.0f) continue;
-
-            float velocity_mm_min = (segment.desiredVelocities[j] / stepsPerUnit) * 60.0f;
-            if (velocity_mm_min > maxDesiredVelocity_mm_min)
+            
+            // Convert steps/s to mm/min
+            desiredVelocities_mm_min[j] = (segment.desiredVelocities[j] / stepsPerUnit) * 60.0f;
+            
+            // Get per-axis acceleration limit in mm/min^2
+            const MotorConfig *config = motor->getConfig();
+            axisAccelerationLimits_mm_min2[j] = (config->maxAcceleration / stepsPerUnit) * 60.0f * 60.0f;
+        }
+        
+        // Calculate desired velocity magnitude
+        float desiredVelocityMagnitude_mm_min = 0.0f;
+        for (float v : desiredVelocities_mm_min)
+        {
+            desiredVelocityMagnitude_mm_min += v * v;
+        }
+        desiredVelocityMagnitude_mm_min = sqrt(desiredVelocityMagnitude_mm_min);
+        
+        // Calculate the maximum possible velocity based on individual axis constraints
+        float maxPossibleVelocity_mm_min = desiredVelocityMagnitude_mm_min;
+        
+        if (currentVelocityMagnitude_mm_min > 0.001f) // Avoid division by zero
+        {
+            // Check acceleration constraint for each axis
+            for (int j = 0; j < numMotors; j++)
             {
-                maxVelocityIndex = j;
-                maxDesiredVelocity_mm_min = velocity_mm_min;
+                if (desiredVelocities_mm_min[j] == 0.0f) continue;
+                
+                // Ratio of this axis movement to total movement
+                float ratio = fabs(desiredVelocities_mm_min[j] / desiredVelocityMagnitude_mm_min);
+                
+                // Effective acceleration limit for this axis
+                float effectiveAccelLimit_mm_min2 = axisAccelerationLimits_mm_min2[j] / ratio;
+                
+                // Calculate maximum velocity this axis can achieve
+                float maxAxisVelocity = sqrtf(currentVelocityMagnitude_mm_min * currentVelocityMagnitude_mm_min +
+                                            2.0f * effectiveAccelLimit_mm_min2 * segment.distance);
+                
+                // Use the most restrictive constraint
+                maxPossibleVelocity_mm_min = std::min(maxPossibleVelocity_mm_min, maxAxisVelocity);
             }
         }
-
-        // Apply acceleration constraint
-        float maxPossibleVelocity_mm_min = sqrtf(currentVelocity_mm_min * currentVelocity_mm_min +
-            2.0f * maxAcceleration_mm_min2 * segment.distance);
-
-        float forwardVelocity = std::min(maxDesiredVelocity_mm_min, maxPossibleVelocity_mm_min);
-        currentVelocity_mm_min = forwardVelocity;
-
-        // Store this for backward pass
+        else
+        {
+            // From stop, start with very low velocity for smooth acceleration
+            maxPossibleVelocity_mm_min = std::min(desiredVelocityMagnitude_mm_min, 100.0f); // Start slow
+        }
+        
+        // Apply machine-wide constraint
+        float machineAccelLimit_mm_min2 = config.maxAcceleration * 60.0f * 60.0f;
+        float machineMaxVelocity = sqrtf(currentVelocityMagnitude_mm_min * currentVelocityMagnitude_mm_min +
+                                       2.0f * machineAccelLimit_mm_min2 * segment.distance);
+        maxPossibleVelocity_mm_min = std::min(maxPossibleVelocity_mm_min, machineMaxVelocity);
+        
+        float forwardVelocity = std::min(desiredVelocityMagnitude_mm_min, maxPossibleVelocity_mm_min);
+        currentVelocityMagnitude_mm_min = forwardVelocity;
+        
+        // Store adjusted velocities for backward pass
         segment.adjustedVelocities.resize(numMotors);
+        float scaleFactor = (desiredVelocityMagnitude_mm_min > 0.0f) ?
+                           (forwardVelocity / desiredVelocityMagnitude_mm_min) : 0.0f;
+        
         for (int j = 0; j < numMotors; j++)
         {
-            // Just store calculated forward velocities temporarily
-            segment.adjustedVelocities[j] = segment.desiredVelocities[j] * 
-                                          (forwardVelocity / maxDesiredVelocity_mm_min);
+            // Convert back to steps/s
+            Motor *motor = motorManager->getMotor(j);
+            if (motor)
+            {
+                float stepsPerUnit = abs(motor->unitsToSteps(1));
+                segment.adjustedVelocities[j] = (desiredVelocities_mm_min[j] * scaleFactor / 60.0f) * stepsPerUnit;
+            }
         }
     }
 
     // Backward pass (deceleration constraint)
-    // Determine exit velocity based on whether this is the final move
-    float exitVelocity = 0.0f; // Default to zero for the final move
+    float exitVelocity = 0.0f;
     
     for (int i = segmentBuffer.size() - 1; i >= 0; i--)
     {
         Segment &segment = segmentBuffer[i];
-
-        // Find the maximum forward-pass velocity across all motors
-        float maxForwardVelocity_mm_min = 0.0f;
-        int maxVelocityIndex = 0;
+        
+        // Calculate adjusted velocity magnitudes
+        std::vector<float> adjustedVelocities_mm_min(numMotors, 0.0f);
+        std::vector<float> axisAccelerationLimits_mm_min2(numMotors, 0.0f);
+        
         for (int j = 0; j < numMotors; j++)
         {
             Motor *motor = motorManager->getMotor(j);
             if (!motor) continue;
-
-            float stepsPerUnit = abs(motor->unitsToSteps(1)); // steps/mm or steps/deg
+            
+            float stepsPerUnit = abs(motor->unitsToSteps(1));
             if (stepsPerUnit == 0.0f) continue;
-
-            float velocity_mm_min = (segment.adjustedVelocities[j] / stepsPerUnit) * 60.0f;
-            if (velocity_mm_min > maxForwardVelocity_mm_min)
+            
+            adjustedVelocities_mm_min[j] = (segment.adjustedVelocities[j] / stepsPerUnit) * 60.0f;
+            
+            const MotorConfig *config = motor->getConfig();
+            axisAccelerationLimits_mm_min2[j] = (config->maxAcceleration / stepsPerUnit) * 60.0f * 60.0f;
+        }
+        
+        float adjustedVelocityMagnitude_mm_min = 0.0f;
+        for (float v : adjustedVelocities_mm_min)
+        {
+            adjustedVelocityMagnitude_mm_min += v * v;
+        }
+        adjustedVelocityMagnitude_mm_min = sqrt(adjustedVelocityMagnitude_mm_min);
+        
+        // Calculate maximum possible velocity based on per-axis deceleration constraints
+        float maxPossibleVelocity_mm_min = adjustedVelocityMagnitude_mm_min;
+        
+        if (adjustedVelocityMagnitude_mm_min > 0.001f)
+        {
+            for (int j = 0; j < numMotors; j++)
             {
-                maxVelocityIndex = j;
-                maxForwardVelocity_mm_min = velocity_mm_min;
+                if (adjustedVelocities_mm_min[j] == 0.0f) continue;
+                
+                float ratio = fabs(adjustedVelocities_mm_min[j] / adjustedVelocityMagnitude_mm_min);
+                float effectiveAccelLimit_mm_min2 = axisAccelerationLimits_mm_min2[j] / ratio;
+                
+                float maxAxisVelocity = sqrtf(exitVelocity * exitVelocity +
+                                            2.0f * effectiveAccelLimit_mm_min2 * segment.distance);
+                
+                maxPossibleVelocity_mm_min = std::min(maxPossibleVelocity_mm_min, maxAxisVelocity);
             }
         }
-
-        // Apply deceleration constraint (how fast we can go and still decelerate to exit velocity)
-        float maxPossibleVelocity_mm_min = sqrtf(exitVelocity * exitVelocity +
-                                                 2.0f * maxAcceleration_mm_min2 * segment.distance);
-
-        // Take minimum of forward-calculated velocity and backward-calculated velocity
-        float finalVelocity = std::min(maxForwardVelocity_mm_min, maxPossibleVelocity_mm_min);
-        exitVelocity = finalVelocity; // For next segment
-
-        // Calculate scaling factor for all joint velocities
-        float scaleFactor = (maxForwardVelocity_mm_min > 0.0f) ?
-                           (finalVelocity / maxForwardVelocity_mm_min) : 0.0f;
-
-        // Apply the scaling factor to all joints
+        
+        // Apply machine-wide constraint
+        float machineAccelLimit_mm_min2 = config.maxAcceleration * 60.0f * 60.0f;
+        float machineMaxVelocity = sqrtf(exitVelocity * exitVelocity +
+                                       2.0f * machineAccelLimit_mm_min2 * segment.distance);
+        maxPossibleVelocity_mm_min = std::min(maxPossibleVelocity_mm_min, machineMaxVelocity);
+        
+        float finalVelocity = std::min(adjustedVelocityMagnitude_mm_min, maxPossibleVelocity_mm_min);
+        exitVelocity = finalVelocity;
+        
+        // Apply final scaling
+        float scaleFactor = (adjustedVelocityMagnitude_mm_min > 0.0f) ?
+                           (finalVelocity / adjustedVelocityMagnitude_mm_min) : 0.0f;
+        
         for (int j = 0; j < numMotors; j++)
         {
             segment.adjustedVelocities[j] *= scaleFactor;

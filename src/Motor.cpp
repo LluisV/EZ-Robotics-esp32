@@ -312,18 +312,22 @@ bool Motor::startHoming()
     homingPhase = 2;
     stepper->setSpeedInHz(config->maxSpeed);
     
-    // Calculate backoff steps
-    float backoffDistance = config->backoffDistance;
-    long backoffSteps = unitsToSteps(backoffDistance);
+    // Calculate backoff steps (without using unitsToSteps because it applies invertPosition)
+    long backoffSteps;
+    if (config->type == LINEAR_AXIS) {
+        backoffSteps = (config->backoffDistance * config->stepsPerRev * config->reduction) / 
+                       config->leadScrewPitch;
+    } else {
+        backoffSteps = (config->backoffDistance * config->stepsPerRev * config->reduction) / 360.0;
+    }
     
-    // Always move opposite to homing direction, but account for invertPosition
-    // invertPosition is already handled in unitsToSteps, so we don't need to apply it here
-    stepper->move(-config->homingDirection * abs(backoffSteps));
+    // Move in the opposite direction of homing
+    stepper->move(-config->homingDirection * backoffSteps);
     
-    Debug::info("Motor", config->name + " backing off " + String(backoffDistance) + 
+    Debug::info("Motor", config->name + " backing off " + String(config->backoffDistance) + 
                 " units, steps=" + String(backoffSteps) + 
                 ", direction=" + String(-config->homingDirection));
-  }
+}
   else
   {
     // Normal case: Start with phase 1 (moving to endstop)
@@ -365,22 +369,32 @@ bool Motor::update()
 
       switch (homingPhase)
       {
-      case 1: // Phase 1: Moving to endstop
+        case 1: // Phase 1: Moving to endstop
         if (isEndstopTriggered())
         {
-          Debug::info("Motor", config->name + " endstop triggered in phase 1");
-          // Endstop hit, stop immediately
-          stepper->forceStop();
-          delay(100); // Short delay for physical stop
-
-          // Phase 2: Back off from endstop
-          homingPhase = 2;
-          stepper->setSpeedInHz(config->maxSpeed);
-          // SAFETY: Always move in the opposite direction of homing direction
-          stepper->move(-config->homingDirection * unitsToSteps(config->backoffDistance));
-
-          Debug::info("Motor", "Backing off " + String(config->backoffDistance) +
-                                   " units in direction " + String(-config->homingDirection));
+            Debug::info("Motor", config->name + " endstop triggered in phase 1");
+            // Endstop hit, stop immediately
+            stepper->forceStop();
+            delay(100); // Short delay for physical stop
+    
+            // Phase 2: Back off from endstop
+            homingPhase = 2;
+            stepper->setSpeedInHz(config->maxSpeed);
+            
+            // Calculate backoff steps (without using unitsToSteps because it applies invertPosition)
+            long backoffSteps;
+            if (config->type == LINEAR_AXIS) {
+                backoffSteps = (config->backoffDistance * config->stepsPerRev * config->reduction) / 
+                               config->leadScrewPitch;
+            } else {
+                backoffSteps = (config->backoffDistance * config->stepsPerRev * config->reduction) / 360.0;
+            }
+            
+            // Move in the opposite direction of homing
+            stepper->move(-config->homingDirection * backoffSteps);
+    
+            Debug::info("Motor", "Backing off " + String(config->backoffDistance) +
+                                 " units in direction " + String(-config->homingDirection));
         }
         break;
 
