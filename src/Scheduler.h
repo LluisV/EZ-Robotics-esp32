@@ -8,6 +8,8 @@
 #include "Debug.h"
 class MachineController;
 #include <deque> 
+#include "MathUtils.h"
+
 
 
 /**
@@ -106,6 +108,7 @@ private:
      * @return True if execution started
      */
     bool executeSegment(const Segment& segment);
+
 };
 
 #endif // SCHEDULER_H

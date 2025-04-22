@@ -123,6 +123,7 @@ void Scheduler::applyVelocityAdjustments()
         currentVelocityMagnitude_mm_min += v * v;
     }
     currentVelocityMagnitude_mm_min = sqrt(currentVelocityMagnitude_mm_min);
+    
 
     // Forward pass (acceleration constraint)
     for (size_t i = 0; i < segmentBuffer.size(); i++)
@@ -307,7 +308,7 @@ bool Scheduler::generateSegmentsProgressive(ScheduledMove &move)
         // First segment batch - use current machine position or last segment position
         if (segmentBuffer.empty())
         {
-            startPosition = machineController->getCurrentWorkPosition();
+            startPosition = machineController->getCurrentWorldPosition();
         }
         else
         {

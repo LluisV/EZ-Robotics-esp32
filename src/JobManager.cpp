@@ -21,19 +21,13 @@ JobManager::JobManager(CommandQueue *commandQueue, FileManager *fileManager)
 
 bool JobManager::update()
 {
-  // Check for emergency stop
-  if (emergencyStopRequested)
-  {
-    // Emergency stop handling
-    stopJob();
-    emergencyStopRequested = false;
-    return false;
-  }
-
-  // If job is running and command queue is below threshold, load more commands
+  // Check if job is running and command queue is below threshold, load more commands
   if (jobStatus == JOB_RUNNING && commandQueue->size() <= bufferThreshold)
   {
     int loaded = loadNextCommandBatch();
+    Debug::verbose("JobManager", "Loaded " + String(loaded) + " commands. Total progress: " 
+                               + String(currentLineNumber) + "/" + String(totalJobLines) 
+                               + " (" + String(getJobProgress()) + "%)");
 
     if (loaded < 0)
     {
@@ -312,10 +306,26 @@ int JobManager::countJobLines(const String &filename)
 
 int JobManager::loadNextCommandBatch()
 {
-  if (!currentJobFile || !commandQueue)
-  {
-    Debug::error("JobManager", "Cannot load commands: File or queue not available");
-    return -1;
+  // Verify file is open and readable
+  if (!currentJobFile || !currentJobFile.available()) {
+    Debug::error("JobManager", "File not open or no data available");
+    if (currentJobFile) {
+      currentJobFile.close();
+    }
+    // Try reopening the file if it was closed prematurely
+    if (currentLineNumber < totalJobLines) {
+      Debug::info("JobManager", "Attempting to reopen file at line " + String(currentLineNumber));
+      currentJobFile = fileManager->openFile(currentJobFilename);
+      if (currentJobFile) {
+        // Skip to current line
+        String line;
+        for (int i = 0; i < currentLineNumber; i++) {
+          if (!fileManager->readLine(currentJobFile, line)) {
+            break;
+          }
+        }
+      }
+    }
   }
 
   if (jobStatus != JOB_RUNNING)

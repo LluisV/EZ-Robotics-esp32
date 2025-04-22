@@ -23,8 +23,8 @@
     "motors": [
       {
         "name": "X",
-        "stepPin": 26,
-        "dirPin": 16,
+        "stepPin": 40,
+        "dirPin": 35,
         "endstopPin": 13,
         "endstopInverted": false,
         "stepsPerRev": 1600,
@@ -44,8 +44,8 @@
       },
       {
         "name": "Y",
-        "stepPin": 25,
-        "dirPin": 27,
+        "stepPin": 41,
+        "dirPin": 36,
         "endstopPin": 5,
         "endstopInverted": false,
         "stepsPerRev": 1600,
@@ -65,9 +65,9 @@
       },
       {
         "name": "Z",
-        "stepPin": 17,
-        "dirPin": 14,
-        "endstopPin": 23,
+        "stepPin": 42,
+        "dirPin": 37,
+        "endstopPin": 46,
         "endstopInverted": false,
         "stepsPerRev": 1600,
         "reduction": 1.0,

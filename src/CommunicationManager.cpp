@@ -50,16 +50,16 @@ bool CommunicationManager::update()
 {
   try
   {
-    // Check for serial data
+    // Check if we're in file receive mode FIRST
+    if (fileTransfer.mode == TRANSFER_RECEIVING)
+    {
+      return handleFileReceiveData();
+    }
+    
+    // Check for serial data for normal command processing
     while (Serial.available() > 0)
     {
       char c = Serial.read();
-
-      // Check if we're in file receive mode
-      if (fileTransfer.mode == TRANSFER_RECEIVING)
-      {
-        return handleFileReceiveData();
-      }
 
       // Normal command processing
       if (c == '\n' || c == '\r')
@@ -731,8 +731,9 @@ bool CommunicationManager::handleFileReceiveData()
     return false;
   }
 
+  // Only check timeout if no data is being received
   unsigned long currentTime = millis();
-  if (currentTime - fileTransfer.lastUpdate > FILE_TRANSFER_TIMEOUT)
+  if (Serial.available() <= 0 && currentTime - fileTransfer.lastUpdate > FILE_TRANSFER_TIMEOUT)
   {
     Debug::error("CommunicationManager",
                  "File Receive Timeout - Transferred " +
@@ -742,83 +743,102 @@ bool CommunicationManager::handleFileReceiveData()
     return false;
   }
 
-  size_t bytesAvailable = Serial.available();
-  if (bytesAvailable <= 0)
-    return true;
-
-  const size_t bufferSize = 512;
-  uint8_t buffer[bufferSize];
-
-  // Limit read size to what's left in the transfer and buffer capacity
-  size_t maxReadable = min(bytesAvailable, fileTransfer.fileSize - fileTransfer.bytesTransferred);
-  size_t bytesToRead = min(bufferSize, maxReadable);
-
-  if (bytesAvailable < bytesToRead)
-    return true; // Wait for full chunk to avoid readBytes timeout
-
-  // Update timeout as soon as data is available
-  fileTransfer.lastUpdate = currentTime;
-
-  size_t bytesRead = Serial.readBytes(buffer, bytesToRead);
-  if (bytesRead == 0)
-    return true; // No data read, try again later
-
-  File file = SPIFFS.open(fileTransfer.filename, "a");
-  if (!file)
+  // Process all available data for better throughput
+  while (Serial.available() > 0 && fileTransfer.bytesTransferred < fileTransfer.fileSize)
   {
-    Debug::error("CommunicationManager",
-                 "Failed to open file for writing: " + fileTransfer.filename);
-    cancelFileTransfer("File open error");
-    return false;
+    const size_t bufferSize = 512;
+    uint8_t buffer[bufferSize];
+
+    // Calculate how many bytes to read in this iteration
+    size_t bytesRemaining = fileTransfer.fileSize - fileTransfer.bytesTransferred;
+    size_t bytesToRead = min(min((size_t)Serial.available(), bufferSize), bytesRemaining);
+    
+    // Read bytes directly without waiting
+    size_t bytesRead = Serial.readBytes(buffer, bytesToRead);
+    
+    if (bytesRead == 0)
+      break; // No more data available right now
+
+    // Update timeout after successfully reading data
+    fileTransfer.lastUpdate = millis();
+
+    File file = SPIFFS.open(fileTransfer.filename, "a");
+    if (!file)
+    {
+      Debug::error("CommunicationManager",
+                  "Failed to open file for writing: " + fileTransfer.filename);
+      cancelFileTransfer("File open error");
+      return false;
+    }
+
+    Debug::warning("CommunicationManager", "Reading " + String(bytesRead) + " bytes");
+
+    // Optional: print hex and string (for debugging only)
+    String hexStr;
+    for (size_t i = 0; i < bytesRead; ++i)
+    {
+      if (buffer[i] < 0x10) hexStr += "0"; // pad single hex digits
+      hexStr += String(buffer[i], HEX) + " ";
+    }
+    Debug::warning("CommunicationManager", "Data (hex): " + hexStr);
+
+    char debugBuffer[bufferSize + 1];
+    memcpy(debugBuffer, buffer, bytesRead);
+    debugBuffer[bytesRead] = '\0';
+    Debug::warning("CommunicationManager", "Data (str): \"" + String(debugBuffer) + "\"");
+
+    size_t bytesWritten = file.write(buffer, bytesRead);
+    file.close();
+
+    if (bytesWritten != bytesRead)
+    {
+      Debug::error("CommunicationManager",
+                  "Write error: " + String(bytesWritten) + "/" + String(bytesRead));
+      cancelFileTransfer("Write error");
+      return false;
+    }
+
+    fileTransfer.bytesTransferred += bytesWritten;
+
+    // Send progress periodically (not for every chunk)
+    if (fileTransfer.bytesTransferred % 512 == 0 || 
+        fileTransfer.bytesTransferred == fileTransfer.fileSize) {
+      int progress = (fileTransfer.bytesTransferred * 100) / fileTransfer.fileSize;
+      sendMessage("Progress: " + String(progress) + "% (" +
+                String(fileTransfer.bytesTransferred) + "/" +
+                String(fileTransfer.fileSize) + " bytes)");
+    }
   }
 
-#ifdef DEBUG_FILE_TRANSFER
-  Debug::warning("CommunicationManager", "Reading " + String(bytesRead) + " bytes");
-
-  // Optional: print hex and string (for debugging only)
-  String hexStr;
-  for (size_t i = 0; i < bytesRead; ++i)
-  {
-    if (buffer[i] < 0x10) hexStr += "0"; // pad single hex digits
-    hexStr += String(buffer[i], HEX) + " ";
-  }
-  Debug::warning("CommunicationManager", "Data (hex): " + hexStr);
-
-  char debugBuffer[bufferSize + 1];
-  memcpy(debugBuffer, buffer, bytesRead);
-  debugBuffer[bytesRead] = '\0';
-  Debug::warning("CommunicationManager", "Data (str): \"" + String(debugBuffer) + "\"");
-#endif
-
-  size_t bytesWritten = file.write(buffer, bytesRead);
-  file.close();
-
-  if (bytesWritten != bytesRead)
-  {
-    Debug::error("CommunicationManager",
-                 "Write error: " + String(bytesWritten) + "/" + String(bytesRead));
-    cancelFileTransfer("Write error");
-    return false;
-  }
-
-  fileTransfer.bytesTransferred += bytesWritten;
-
-  // Send progress
-  int progress = (fileTransfer.bytesTransferred * 100) / fileTransfer.fileSize;
-  sendMessage("Progress: " + String(progress) + "% (" +
-              String(fileTransfer.bytesTransferred) + "/" +
-              String(fileTransfer.fileSize) + " bytes)");
-
+  // Check if file transfer is complete
   if (fileTransfer.bytesTransferred >= fileTransfer.fileSize)
   {
+    // Flush file to ensure all data is written
+    File file = SPIFFS.open(fileTransfer.filename, "a");
+    if (file) {
+      file.flush();
+      file.close();
+    }
+  
+    // Double-check file size matches what we expected
+    size_t actualSize = fileManager->getFileSize(fileTransfer.filename);
+    if (actualSize != fileTransfer.fileSize) {
+      Debug::warning("CommunicationManager", 
+        "File size mismatch - Expected: " + String(fileTransfer.fileSize) + 
+        ", Actual: " + String(actualSize));
+    }
+  
+    // Add a small delay to ensure file system operations complete
+    delay(50);
+    
     sendMessage(FILE_END_SEQUENCE);
     sendMessage("File receive completed: " + fileTransfer.filename +
                 " (" + String(fileTransfer.bytesTransferred) + " bytes)");
-
+  
     Debug::info("CommunicationManager",
                 "File receive fully completed: " + fileTransfer.filename +
                     " (" + String(fileTransfer.bytesTransferred) + " bytes)");
-
+  
     fileTransfer.mode = TRANSFER_IDLE;
   }
 

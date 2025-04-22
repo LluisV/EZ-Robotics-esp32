@@ -35,7 +35,7 @@ enum class GCodeParseResult
  */
 struct Segment {
   std::vector<float> jointPositions;     // Target positions for each joint (mm)
-  std::vector<float> desiredVelocities;         // Desired velocities for each joint (steps/s)
+  std::vector<float> desiredVelocities;  // Desired velocities for each joint (steps/s)
   std::vector<float> adjustedVelocities; // Adjusted velocities after look-ahead (steps/s)
   float distance;                        // Segment distance (mm)
 };

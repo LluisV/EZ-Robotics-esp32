@@ -37,14 +37,7 @@
       */
      static float angleBetweenVectors(const std::vector<float>& vec1, const std::vector<float>& vec2);
      
-     /**
-      * @brief Calculate a junction velocity based on the angle between two movement vectors
-      * @param v1 First velocity (mm/min)
-      * @param v2 Second velocity (mm/min)
-      * @param angle Angle between vectors in radians
-      * @return Junction velocity (mm/min)
-      */
-     static float calculateJunctionVelocity(float v1, float v2, float angle);
+
  };
  
  #endif // MATH_UTILS_H

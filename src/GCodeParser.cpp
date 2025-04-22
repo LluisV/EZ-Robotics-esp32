@@ -425,32 +425,36 @@
    case 91: // G91: Set to relative positioning
      machineController->setAbsoluteMode(false);
      return true;
- 
+
    case 92:
-   { // G92: Set work position
-     std::vector<float> currentWorldPos = machineController->getCurrentWorldPosition();
-     std::vector<float> newWorkOffset = currentWorldPos;
- 
-     auto it = params.find('X');
-     if (it != params.end())
-       newWorkOffset[0] = currentWorldPos[0] - it->second;
- 
-     it = params.find('Y');
-     if (it != params.end())
-       newWorkOffset[1] = currentWorldPos[1] - it->second;
- 
-     it = params.find('Z');
-     if (it != params.end())
-       newWorkOffset[2] = currentWorldPos[2] - it->second;
- 
-     machineController->setWorkOffset(newWorkOffset);
-     
-     // Update last target position to match new work position
-     std::vector<float> newWorkPos = machineController->getCurrentWorkPosition();
-     lastTargetPosition = newWorkPos;
-     
-     return true;
-   }
+     { // G92: Set work position
+       std::vector<float> currentWorldPos = machineController->getCurrentWorldPosition();
+       std::vector<float> newWorkOffset = machineController->getWorkOffset();
+       
+       auto it = params.find('X');
+       if (it != params.end()) {
+         // Calculate the new offset: world_position - desired_work_position
+         newWorkOffset[0] = currentWorldPos[0] - it->second;
+       }
+       
+       it = params.find('Y');
+       if (it != params.end()) {
+         newWorkOffset[1] = currentWorldPos[1] - it->second;
+       }
+       
+       it = params.find('Z');
+       if (it != params.end()) {
+         newWorkOffset[2] = currentWorldPos[2] - it->second;
+       }
+       
+       machineController->setWorkOffset(newWorkOffset);
+       
+       // Update last target position to match new work position
+       std::vector<float> newWorkPos = machineController->getCurrentWorkPosition();
+       lastTargetPosition = newWorkPos;
+       
+       return true;
+     }
  
    default:
      Debug::error("GCodeParser","Unsupported G-code: G" + String(code));
