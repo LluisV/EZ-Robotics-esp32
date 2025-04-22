@@ -281,8 +281,7 @@ bool Motor::isMoving() const
   {
     return false;
   }
-  
-  return stepper->isRunning();
+  return stepper->rampState() != RAMP_STATE_IDLE && stepper->rampState() != RAMP_STATE_DECELERATE;
 }
 
 MotorStatus Motor::getStatus() const
@@ -313,7 +312,7 @@ bool Motor::startHoming()
     homingPhase = 2;
     stepper->setSpeedInHz(config->maxSpeed);
     
-    // Calculate backoff steps - IMPORTANT FIX HERE
+    // Calculate backoff steps
     float backoffDistance = config->backoffDistance;
     long backoffSteps = unitsToSteps(backoffDistance);
     

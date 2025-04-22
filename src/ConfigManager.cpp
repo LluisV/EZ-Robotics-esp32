@@ -207,7 +207,7 @@ void ConfigManager::useDefaultConfig()
   // Setup default machine configuration
   machineConfig.machineName = "Default CNC";
   machineConfig.defaultFeedrate = 1000.0; //  mm/min
-  machineConfig.maxFeedrate = 5000.0;     //  mm/min
+  machineConfig.maxFeedrate = 2000.0;     //  mm/min
   machineConfig.maxAcceleration = 30.0;     // mm/s^2
   machineConfig.junctionDeviation = 0.05; // 0.01 mm
   machineConfig.arcTolerance = 0.002;     // 0.002 mm
@@ -226,7 +226,7 @@ void ConfigManager::useDefaultConfig()
   xConfig.reduction = 1.0;
   xConfig.leadScrewPitch = 5.0;
   xConfig.type = LINEAR_AXIS;
-  xConfig.maxSpeed = 12000;
+  xConfig.maxSpeed = 2000;
   xConfig.homeSpeed = 1000;
   xConfig.maxAcceleration = 8000;
   xConfig.homingDirection = -1;
@@ -249,7 +249,7 @@ void ConfigManager::useDefaultConfig()
   yConfig.reduction = 1.0;
   yConfig.leadScrewPitch = 5.0;
   yConfig.type = LINEAR_AXIS;
-  yConfig.maxSpeed = 12000;
+  yConfig.maxSpeed = 2000;
   yConfig.homeSpeed = 1000;
   yConfig.maxAcceleration = 8000;
   yConfig.homingDirection = -1;
@@ -272,7 +272,7 @@ void ConfigManager::useDefaultConfig()
   zConfig.reduction = 1.0;
   zConfig.leadScrewPitch = 5.0;
   zConfig.type = LINEAR_AXIS;
-  zConfig.maxSpeed = 12000;
+  zConfig.maxSpeed = 2000;
   zConfig.homeSpeed = 1000;
   zConfig.maxAcceleration = 8000;
   zConfig.homingDirection = -1;
@@ -370,7 +370,7 @@ bool ConfigManager::parseMotorConfig(const JsonObject &json, MotorConfig &config
     config.type = LINEAR_AXIS;
   }
 
-  config.maxSpeed = json["maxSpeed"].is<int>() ? json["maxSpeed"].as<int>() : 5000;
+  config.maxSpeed = json["maxSpeed"].is<int>() ? json["maxSpeed"].as<int>() : 2000;
   config.homeSpeed = json["homeSpeed"].is<int>() ? json["homeSpeed"].as<int>() : 1000;
   config.maxAcceleration = json["maxAcceleration"].is<int>() ? json["maxAcceleration"].as<int>() : 1000;
   config.homingDirection = json["homingDirection"].is<int>() ? json["homingDirection"].as<int>() : -1;
@@ -404,7 +404,7 @@ bool ConfigManager::parseMachineConfig(const JsonObject &json)
 
   machineConfig.machineName = json["machineName"].is<String>() ? json["machineName"].as<String>() : "Default CNC";
   machineConfig.defaultFeedrate = json["defaultFeedrate"].is<float>() ? json["defaultFeedrate"].as<float>() : 1000.0f;
-  machineConfig.maxFeedrate = json["maxFeedrate"].is<float>() ? json["maxFeedrate"].as<float>() : 5000.0f;
+  machineConfig.maxFeedrate = json["maxFeedrate"].is<float>() ? json["maxFeedrate"].as<float>() : 2000.0f;
   machineConfig.junctionDeviation = json["junctionDeviation"].is<float>() ? json["junctionDeviation"].as<float>() : 0.01f;
   machineConfig.arcTolerance = json["arcTolerance"].is<float>() ? json["arcTolerance"].as<float>() : 0.002f;
 

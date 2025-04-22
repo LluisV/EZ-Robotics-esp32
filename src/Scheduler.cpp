@@ -397,32 +397,57 @@ bool Scheduler::executeSegment(const Segment &segment)
 
 bool Scheduler::executeNextSegment()
 {
-
     // Process the moves queue to generate segments if needed
     processQueue();
     
-    // If we're currently executing a segment, don't start a new one
+    // For smooth motion, we need to check if we're near the end of current moves
+    // and start the next one before completely stopping
+    bool motorsNearlyDone = false;
+    int numMotors = motorManager->getNumMotors();
+    
     if (motorManager->isAnyMotorMoving())
     {
-        return false;
+        motorsNearlyDone = true;
+        // Check if motors are close to finishing (less than 10% of steps remaining)
+        for (int i = 0; i < numMotors; i++)
+        {
+            Motor *motor = motorManager->getMotor(i);
+            if (motor)
+            {
+                if (motor->isMoving())
+                {
+                    long stepsLeft = abs(motor->getTargetPosition() - motor->getPosition());
+                    long totalSteps = abs(motor->getTargetPosition() - currentSteps[i]);
+                    if (totalSteps > 0 && stepsLeft > 4)
+                    {
+                        motorsNearlyDone = false;
+                        break;
+                    }
+                }
+            }
+        }
     }
 
-    // If we have segments, execute the next one
-    if (!segmentBuffer.empty())
+    // Execute next segment if motors are idle or nearly done
+    if (!motorManager->isAnyMotorMoving() || motorsNearlyDone)
     {
-        Segment &segment = segmentBuffer.front();
-        bool result = executeSegment(segment);
+        if (!segmentBuffer.empty())
+        {
+            Segment &segment = segmentBuffer.front();
+            bool result = executeSegment(segment);
 
-        // If execution was successful, pop from buffer
-        if (result)
-            segmentBuffer.pop_front();
+            // If execution was successful, pop from buffer
+            if (result)
+                segmentBuffer.pop_front();
 
-        return result;
+            return result;
+        }
+        else if(!motorManager->isAnyMotorMoving())
+        {
+            machineController->setCurrentDesiredVelocityVector({0.0f,0.0f,0.0f});
+        }
     }
-    else if(!motorManager->isAnyMotorMoving())
-    {
-        machineController->setCurrentDesiredVelocityVector({0.0f,0.0f,0.0f});
-    }
+    
     return false;
 }
 
