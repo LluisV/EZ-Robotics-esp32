@@ -218,9 +218,9 @@ void ConfigManager::useDefaultConfig()
   // Setup default X axis
   MotorConfig xConfig;
   xConfig.name = "X";
-  xConfig.stepPin = 40;
-  xConfig.dirPin = 35;
-  xConfig.endstopPin = 13;
+  xConfig.stepPin = 13;
+  xConfig.dirPin = 12;
+  xConfig.endstopPin = 15;
   xConfig.endstopInverted = false;
   xConfig.stepsPerRev = 1600;
   xConfig.reduction = 1.0;
@@ -241,9 +241,9 @@ void ConfigManager::useDefaultConfig()
   // Setup default Y axis
   MotorConfig yConfig;
   yConfig.name = "Y";
-  yConfig.stepPin = 41;
-  yConfig.dirPin = 36;
-  yConfig.endstopPin = 5;
+  yConfig.stepPin = 33;
+  yConfig.dirPin = 32;
+  yConfig.endstopPin = 18;
   yConfig.endstopInverted = false;
   yConfig.stepsPerRev = 1600;
   yConfig.reduction = 1.0;
@@ -264,9 +264,9 @@ void ConfigManager::useDefaultConfig()
   // Setup default Z axis
   MotorConfig zConfig;
   zConfig.name = "Z";
-  zConfig.stepPin = 42;
-  zConfig.dirPin = 37;
-  zConfig.endstopPin = 23;
+  zConfig.stepPin = 26;
+  zConfig.dirPin = 25;
+  zConfig.endstopPin = 19;
   zConfig.endstopInverted = false;
   zConfig.stepsPerRev = 1600;
   zConfig.reduction = 1.0;
