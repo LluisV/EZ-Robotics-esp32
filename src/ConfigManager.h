@@ -34,9 +34,9 @@ struct MotorConfig
   float reduction;       ///< Mechanical reduction (for direct drive = 1.0)
   float leadScrewPitch;  ///< Lead screw pitch in mm (only for LINEAR type)
   AxisType type;         ///< Axis type (LINEAR or ANGULAR)
-  int maxSpeed;          ///< Maximum speed in steps/second
-  int homeSpeed;         ///< Homing speed in steps/second
-  int maxAcceleration;   ///< Acceleration in steps/second²
+  float maxSpeed;          ///< Maximum speed in steps/second
+  float homeSpeed;         ///< Homing speed in steps/second
+  float maxAcceleration;   ///< Acceleration in steps/second²
   int homingDirection;   ///< 1 or -1
   float backoffDistance; ///< Backoff distance after homing in mm or degrees
   float minPosition;     ///< Minimum allowed position

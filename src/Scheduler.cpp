@@ -410,12 +410,6 @@ bool Scheduler::generateSegmentsProgressive(ScheduledMove &move)
 
 bool Scheduler::executeSegment(const Segment &segment)
 {
-    // Don't execute new segment if motors are still moving
-    if (motorManager->isAnyMotorMoving())
-    {
-        return false;
-    }
-
     // Get number of motors
     int numMotors = motorManager->getNumMotors();
     if (numMotors != segment.jointPositions.size())
@@ -497,7 +491,7 @@ bool Scheduler::executeNextSegment()
                 {
                     long stepsLeft = abs(motor->getTargetPosition() - motor->getPosition());
                     long totalSteps = abs(motor->getTargetPosition() - currentSteps[i]);
-                    if (totalSteps > 0 && stepsLeft > 10)
+                    if (totalSteps > 0 && stepsLeft > 4)
                     {
                         motorsNearlyDone = false;
                         break;
@@ -508,7 +502,7 @@ bool Scheduler::executeNextSegment()
     }
 
     // Execute next segment if motors are idle or nearly done
-    if (!motorManager->isAnyMotorMoving() || motorsNearlyDone)
+    if (!motorManager->isAnyMotorMoving())// || motorsNearlyDone)
     {
         if (!segmentBuffer.empty())
         {
