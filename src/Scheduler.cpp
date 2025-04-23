@@ -497,7 +497,7 @@ bool Scheduler::executeNextSegment()
                 {
                     long stepsLeft = abs(motor->getTargetPosition() - motor->getPosition());
                     long totalSteps = abs(motor->getTargetPosition() - currentSteps[i]);
-                    if (totalSteps > 0 && stepsLeft > 4)
+                    if (totalSteps > 0 && stepsLeft > 10)
                     {
                         motorsNearlyDone = false;
                         break;

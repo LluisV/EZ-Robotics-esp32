@@ -220,7 +220,7 @@ void ConfigManager::useDefaultConfig()
   xConfig.name = "X";
   xConfig.stepPin = 13;
   xConfig.dirPin = 12;
-  xConfig.endstopPin = 15;
+  xConfig.endstopPin = 14;
   xConfig.endstopInverted = false;
   xConfig.stepsPerRev = 1600;
   xConfig.reduction = 1.0;
@@ -243,7 +243,7 @@ void ConfigManager::useDefaultConfig()
   yConfig.name = "Y";
   yConfig.stepPin = 33;
   yConfig.dirPin = 32;
-  yConfig.endstopPin = 18;
+  yConfig.endstopPin = 15;
   yConfig.endstopInverted = false;
   yConfig.stepsPerRev = 1600;
   yConfig.reduction = 1.0;
@@ -266,7 +266,7 @@ void ConfigManager::useDefaultConfig()
   zConfig.name = "Z";
   zConfig.stepPin = 26;
   zConfig.dirPin = 25;
-  zConfig.endstopPin = 19;
+  zConfig.endstopPin = 4;
   zConfig.endstopInverted = false;
   zConfig.stepsPerRev = 1600;
   zConfig.reduction = 1.0;

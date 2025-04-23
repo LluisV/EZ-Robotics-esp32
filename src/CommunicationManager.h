@@ -1,6 +1,6 @@
 /**
  * @file CommunicationManager.h
- * @brief Communication manager for handling serial and future websocket connections
+ * @brief Enhanced Communication manager with improved file transfer reliability
  */
 
 #ifndef COMMUNICATION_MANAGER_H
@@ -20,6 +20,15 @@ class JobManager;
 // Maximum line length for receiving commands
 #define MAX_LINE_LENGTH 128
 
+// Maximum time between progress updates in milliseconds
+#define PROGRESS_UPDATE_INTERVAL 1000
+
+// Timeout for file transfers in milliseconds
+#define FILE_TRANSFER_TIMEOUT 5000
+
+// Size of file transfer receive buffer
+#define FILE_TRANSFER_BUFFER_SIZE 512
+
 // Enumeration for file transfer modes
 enum FileTransferMode
 {
@@ -28,21 +37,37 @@ enum FileTransferMode
   TRANSFER_SENDING    ///< Sending a file to serial
 };
 
+// Enumeration for file transfer error codes
+enum FileTransferError
+{
+  TRANSFER_NO_ERROR,              ///< No error
+  TRANSFER_TIMEOUT,               ///< Transfer timeout
+  TRANSFER_FILE_OPEN_ERROR,       ///< Failed to open file
+  TRANSFER_WRITE_ERROR,           ///< Failed to write data
+  TRANSFER_SIZE_MISMATCH,         ///< File size doesn't match expected size
+  TRANSFER_CANCELLED,             ///< Transfer cancelled by user
+  TRANSFER_DEVICE_DISCONNECTED    ///< Device disconnected during transfer
+};
+
 // Structure to hold file transfer state
 struct FileTransferState
 {
-  FileTransferMode mode;    ///< Current file transfer mode
-  String filename;          ///< Name of the file being transferred
-  size_t bytesTransferred;  ///< Number of bytes transferred
-  size_t fileSize;          ///< Total file size in bytes
-  unsigned long startTime;  ///< Transfer start time
-  unsigned long lastUpdate; ///< Last update time for timeout tracking
-  bool error;               ///< Error flag
-  String errorMessage;      ///< Error message if any
+  FileTransferMode mode;              ///< Current file transfer mode
+  String filename;                    ///< Name of the file being transferred
+  size_t bytesTransferred;            ///< Number of bytes transferred
+  size_t fileSize;                    ///< Total file size in bytes
+  unsigned long startTime;            ///< Transfer start time
+  unsigned long lastUpdate;           ///< Last update time for timeout tracking
+  unsigned long lastProgressUpdate;   ///< Last time progress was reported
+  bool error;                         ///< Error flag
+  String errorMessage;                ///< Error message if any
+  FileTransferError errorCode;        ///< Error code
+  uint8_t retryCount;                 ///< Number of retries attempted
+  uint8_t maxRetries;                 ///< Maximum allowed retries
 };
 
 /**
- * @brief Communication manager class for handling serial and future websocket connections
+ * @brief Enhanced communication manager class for reliable file transfers
  */
 class CommunicationManager
 {
@@ -129,9 +154,47 @@ public:
    */
   void sendPositionTelemetry(bool force = false);
 
+  /**
+   * @brief Get telemetry frequency in Hz
+   * @return Current telemetry frequency
+   */
   int getTelemetryFrequency() const
   {
     return telemetryFrequency;
+  }
+
+  /**
+   * @brief Finalize a file transfer, ensuring all data is properly written
+   */
+  void finalizeFileTransfer();
+
+  /**
+   * @brief Retry a failed file transfer
+   * @return True if retry was successful, false otherwise
+   */
+  bool retryFileTransfer();
+
+  /**
+   * @brief Reset all file transfer state
+   */
+  void resetFileTransfer();
+
+  /**
+   * @brief Get the current file transfer state
+   * @return Current file transfer state
+   */
+  const FileTransferState& getFileTransferState() const
+  {
+    return fileTransfer;
+  }
+  
+  /**
+   * @brief Set the maximum retries for file transfers
+   * @param maxRetries Maximum retry count
+   */
+  void setMaxFileTransferRetries(uint8_t maxRetries)
+  {
+    fileTransfer.maxRetries = maxRetries;
   }
 
 private:
