@@ -138,134 +138,126 @@ void communicationTask(void *parameter)
 // In main.cpp, modify the motion task to minimize delays:
 void motionTask(void *parameter)
 {
-  btStop();
+  // Configure this task for maximum performance
+  btStop();  // Disable Bluetooth to free resources
+  setCpuFrequencyMhz(240);  // Use maximum CPU frequency
+  
+  // Pin this task to Core 1 with high priority and disable watchdog
+  TaskHandle_t taskHandle = xTaskGetCurrentTaskHandle();
+  esp_task_wdt_delete(taskHandle);  // Disable watchdog for this task
+  vTaskPrioritySet(taskHandle, configMAX_PRIORITIES - 1);  // Set to maximum priority
+  
+  Debug::info("MotionTask", "Task started on Core " + String(xPortGetCoreID()) + 
+              " with priority " + String(uxTaskPriorityGet(taskHandle)));
 
-  // Use higher CPU frequency during motion
-  setCpuFrequencyMhz(240);
-
-  // Pin critical tasks to specific cores
-  esp_task_wdt_delete(NULL); // Disable watchdog for this task
-
-  Debug::info("MotionTask", "Task started on Core " + String(xPortGetCoreID()));
-
-  String pendingCommand = "";
+  // Setup high resolution timing
+  const TickType_t xFrequency = 1;  // 1ms default task frequency
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  
+  // Command processing timing
+  const unsigned long COMMAND_INTERVAL_DURING_MOTION = 20;  // Process commands less frequently during motion
+  const unsigned long COMMAND_INTERVAL_IDLE = 5;  // Process commands more frequently when idle
   unsigned long lastCommandTime = 0;
-  const unsigned long COMMAND_INTERVAL = 10; // Process commands every 10ms
+  unsigned long currentTime;
+
+  // Allocate buffers once for reuse
+  String command;
+  command.reserve(128);  // Pre-allocate memory for command string
 
   while (true)
   {
     try
     {
-      // Process segments from the scheduler - HIGHEST PRIORITY
+      // Always prioritize motor updates
+      currentTime = millis();
+      motorManager.update();
+      
+      // Process segments from the scheduler
       if (scheduler)
       {
-        // Execute the next movement segment
         scheduler->executeNextSegment();
       }
-      // Update motor states - this should be called frequently
-      motorManager.update();
-
-      if (!motorManager.isAnyMotorMoving() || millis() - lastCommandTime >= COMMAND_INTERVAL)
+      
+      // Process commands from queue less frequently and when appropriate
+      unsigned long commandInterval = motorManager.isAnyMotorMoving() ? 
+                                     COMMAND_INTERVAL_DURING_MOTION : COMMAND_INTERVAL_IDLE;
+                                     
+      if (currentTime - lastCommandTime >= commandInterval)
       {
-        // Process commands from queue less frequently
-        unsigned long currentTime = millis();
-        if (currentTime - lastCommandTime >= COMMAND_INTERVAL)
+        lastCommandTime = currentTime;
+        
+        // Process commands from queue
+        if (machineController && gCodeParser && commandQueue && !commandQueue->isEmpty())
         {
-          lastCommandTime = currentTime;
-
-          // Process commands from queue
-          if (machineController && gCodeParser && commandQueue && !commandQueue->isEmpty())
+          // First check for immediate commands - these have highest priority
+          String immediateCmd = commandQueue->getNextImmediate();
+          if (immediateCmd.length() > 0)
           {
-            // First check for immediate commands
-            String immediateCmd = commandQueue->getNextImmediate();
-            if (immediateCmd.length() > 0)
+            // Process emergency stop immediately without parsing
+            if (immediateCmd.startsWith("M112") || immediateCmd.startsWith("STOP"))
             {
-              Debug::info("MotionTask", "Processing immediate command: " + immediateCmd);
-
-              // Process immediate command
-              GCodeParseResult parseResult = gCodeParser->parse(immediateCmd);
-              switch (parseResult)
-              {
-              case GCodeParseResult::PARSE_ERROR:
-                Debug::error("MotionTask", "Failed to execute immediate command: " + immediateCmd);
-
-                if (immediateCmd.startsWith("M112") || immediateCmd.startsWith("STOP"))
-                {
-                  machineController->emergencyStop();
-                }
-                break;
-
-              case GCodeParseResult::QUEUE_FULL:
-                Debug::warning("MotionTask", "Scheduler queue full for immediate command, requeueing: " + immediateCmd);
-                if (immediateCmd.startsWith("M112") || immediateCmd.startsWith("STOP"))
-                {
-                  machineController->emergencyStop();
-                }
-                else
-                {
-                  commandQueue->push(immediateCmd, IMMEDIATE);
-                }
-                break;
-
-              case GCodeParseResult::SUCCESS:
-                // Command successfully processed
-                break;
-              }
+              Debug::info("MotionTask", "Emergency stop command received");
+              machineController->emergencyStop();
             }
-            // Process regular commands
             else
             {
-              if (commandQueue->isEmpty())
-                continue;
-              String command = commandQueue->pop();
-              Debug::verbose("MotionTask", "Processing command from queue: " + command);
-
-              // Parse as G-code
-              GCodeParseResult parseResult = gCodeParser->parse(command);
-              switch (parseResult)
+              // Process other immediate commands
+              GCodeParseResult parseResult = gCodeParser->parse(immediateCmd);
+              
+              // For queue full case, requeue with immediate priority
+              if (parseResult == GCodeParseResult::QUEUE_FULL)
               {
-              case GCodeParseResult::PARSE_ERROR:
-                Debug::error("MotionTask", "Failed to execute command: " + command);
-
-                if (jobManager && jobManager->isJobRunning())
-                {
-                  Debug::warning("MotionTask", "Command failed during job execution");
-                }
-                break;
-
-              case GCodeParseResult::QUEUE_FULL:
-                Debug::warning("MotionTask", "Scheduler queue full, requeueing command: " + command);
-                commandQueue->push(command, IMMEDIATE);
-                break;
-
-              case GCodeParseResult::SUCCESS:
-                // Command successfully processed
-                break;
+                commandQueue->push(immediateCmd, IMMEDIATE);
               }
+            }
+          }
+          // Process regular commands
+          else if (!commandQueue->isEmpty() && !motorManager.isAnyMotorMoving())
+          {
+            command = commandQueue->pop();
+            
+            // Parse as G-code
+            GCodeParseResult parseResult = gCodeParser->parse(command);
+            
+            // Handle queue full case by requeueing
+            if (parseResult == GCodeParseResult::QUEUE_FULL)
+            {
+              commandQueue->push(command, MOTION);
             }
           }
         }
       }
 
-      // Yield without delay during motion
+      // Efficient sleep strategy based on motion state
       if (motorManager.isAnyMotorMoving())
       {
-        taskYIELD();
+        // During motion, use vTaskDelayUntil for precise timing
+        xLastWakeTime = xTaskGetTickCount();
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
       }
       else
       {
+        // When idle, use regular delay to save power
         vTaskDelay(1);
       }
     }
     catch (const std::exception &e)
     {
       Debug::error("MotionTask", "Exception caught: " + String(e.what()));
-      // Error handling code...
+      
+      // Emergency stop on exceptions
+      if (machineController) {
+        machineController->emergencyStop();
+      }
     }
     catch (...)
     {
       Debug::error("MotionTask", "Unknown exception caught");
-      // Error handling code...
+      
+      // Emergency stop on exceptions
+      if (machineController) {
+        machineController->emergencyStop();
+      }
     }
   }
 }
