@@ -218,10 +218,18 @@
     setCurrentDesiredVelocityVector(velVector);
     
     // Send move to appropriate planner function
-    if (movementType == RAPID_MOTION) {
-      return motionPlanner->addRapidMove(motionTargetPos);
-    } else {
-      return motionPlanner->addLinearMove(motionTargetPos, feedrate);
+    try {
+      if (movementType == RAPID_MOTION) {
+        return motionPlanner->addRapidMove(motionTargetPos);
+      } else {
+        return motionPlanner->addLinearMove(motionTargetPos, feedrate);
+      }
+    } catch (std::exception& e) {
+      Debug::error("MachineController", "Exception in motion planning: " + String(e.what()));
+      return false;
+    } catch (...) {
+      Debug::error("MachineController", "Unknown exception in motion planning");
+      return false;
     }
   } else {
     Debug::error("MachineController", "No motion planner instanced");

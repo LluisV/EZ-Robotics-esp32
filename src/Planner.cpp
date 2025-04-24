@@ -312,17 +312,9 @@ int32_t mm_to_steps(float mm, int axis) {
     // Default conversion factor if motor manager is unavailable
     float stepsPerMm = 80.0f; // Standard value, will be overridden if motor info available
     
-    // Set axis name based on index, defaulting to X if out of range
-    String axisName = "X";
-    if (axis == 1) axisName = "Y";
-    else if (axis == 2) axisName = "Z";
-    else if (axis == 3) axisName = "A";
-    else if (axis == 4) axisName = "B";
-    else if (axis == 5) axisName = "C";
-    
     // Safely attempt to get more accurate information if motorManager is available
     if (motorManager != nullptr) {
-        Motor* motor = motorManager->getMotorByName(axisName);
+        Motor* motor = motorManager->getMotor(axis);
         if (motor != nullptr) {
             // Use proper conversion from the motor's configuration
             return motor->unitsToSteps(mm);
@@ -346,17 +338,9 @@ float steps_to_mm(int32_t steps, int axis) {
     // Default conversion factor if motor manager is unavailable
     float stepsPerMm = 80.0f; // Standard value, will be overridden if motor info available
     
-    // Set axis name based on index, defaulting to X if out of range
-    String axisName = "X";
-    if (axis == 1) axisName = "Y";
-    else if (axis == 2) axisName = "Z";
-    else if (axis == 3) axisName = "A";
-    else if (axis == 4) axisName = "B";
-    else if (axis == 5) axisName = "C";
-    
     // Safely attempt to get more accurate information if motorManager is available
     if (motorManager != nullptr) {
-        Motor* motor = motorManager->getMotorByName(axisName);
+        Motor* motor = motorManager->getMotor(axis);
         if (motor != nullptr) {
             // Use proper conversion from the motor's configuration
             return motor->stepsToUnits(steps);
@@ -374,7 +358,7 @@ float steps_to_mm(int32_t steps, int axis) {
   * @return True on success
   */
  bool Planner::buffer_line(float* target, plan_line_data_t* pl_data) {
-    // Validate inputs
+    // Validate inputs with more robust error handling
     if (target == nullptr) {
         Debug::error("Planner", "Buffer line called with null target");
         return false;
@@ -398,12 +382,29 @@ float steps_to_mm(int32_t steps, int axis) {
     }
     
     plan_block_t* block = &block_buffer[block_buffer_head];
-    memset(block, 0, sizeof(plan_block_t));
+    if (block == nullptr) {
+        Debug::error("Planner", "Invalid block pointer");
+        return false;
+    }
     
-    // Copy motion parameters
-    block->motion = pl_data->motion;
-    block->line_number = pl_data->line_number;
-    block->is_jog = pl_data->is_jog;
+    // Initialize the block with zeros for safety
+    try {
+        memset(block, 0, sizeof(plan_block_t));
+    } catch (...) {
+        Debug::error("Planner", "Failed to initialize block");
+        return false;
+    }
+    
+    // Copy motion parameters with error handling
+    try {
+        block->motion = pl_data->motion;
+        block->line_number = pl_data->line_number;
+        block->is_jog = pl_data->is_jog;
+    } catch (...) {
+        Debug::error("Planner", "Failed to copy motion parameters");
+        return false;
+    }
+    
     
     // Convert target position to steps and calculate move distance
     int32_t target_steps[MAX_N_AXIS], position_steps[MAX_N_AXIS];
@@ -619,67 +620,6 @@ float steps_to_mm(int32_t steps, int axis) {
          cycle_reinitialize();
      }
  }
- 
- /**
-  * @brief Convert millimeters to steps
-  * @param mm Distance in millimeters
-  * @param axis Axis index
-  * @return Number of steps
-  */
- int32_t mm_to_steps(float mm, int axis) {
-     extern MotorManager* motorManager; // Declare external reference to the global motorManager
-     
-     // Get the appropriate motor by axis index
-     String axisName;
-     switch(axis) {
-         case 0: axisName = "X"; break;
-         case 1: axisName = "Y"; break;
-         case 2: axisName = "Z"; break;
-         case 3: axisName = "A"; break;
-         case 4: axisName = "B"; break;
-         case 5: axisName = "C"; break;
-         default: axisName = "X"; // Default to X if invalid axis
-     }
-     
-     Motor* motor = motorManager->getMotorByName(axisName);
-     if (motor) {
-         return motor->unitsToSteps(mm);
-     }
-     
-     // Fallback to a default value if motor not found
-     return (int32_t)(mm * 80.0f); // Default 80 steps/mm
- }
- 
- /**
-  * @brief Convert steps to millimeters
-  * @param steps Number of steps
-  * @param axis Axis index
-  * @return Distance in millimeters
-  */
- float steps_to_mm(int32_t steps, int axis) {
-     extern MotorManager* motorManager; // Declare external reference to the global motorManager
-     
-     // Get the appropriate motor by axis index
-     String axisName;
-     switch(axis) {
-         case 0: axisName = "X"; break;
-         case 1: axisName = "Y"; break;
-         case 2: axisName = "Z"; break;
-         case 3: axisName = "A"; break;
-         case 4: axisName = "B"; break;
-         case 5: axisName = "C"; break;
-         default: axisName = "X"; // Default to X if invalid axis
-     }
-     
-     Motor* motor = motorManager->getMotorByName(axisName);
-     if (motor) {
-         return motor->stepsToUnits(steps);
-     }
-     
-     // Fallback to a default value if motor not found
-     return steps / 80.0f; // Default 80 steps/mm
- }
- 
  
  /**
   * @brief Sync the planner position with the machine position
