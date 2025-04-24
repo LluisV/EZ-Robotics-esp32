@@ -307,14 +307,14 @@
  */
 int32_t mm_to_steps(float mm, int axis) {
     // Safety check for global variable
-    extern MotorManager* motorManager; // Declare external reference 
+    extern MotorManager* g_motorManager; // Declare external reference 
     
     // Default conversion factor if motor manager is unavailable
     float stepsPerMm = 80.0f; // Standard value, will be overridden if motor info available
     
     // Safely attempt to get more accurate information if motorManager is available
-    if (motorManager != nullptr) {
-        Motor* motor = motorManager->getMotor(axis);
+    if (g_motorManager != nullptr) {
+        Motor* motor = g_motorManager->getMotor(axis);
         if (motor != nullptr) {
             // Use proper conversion from the motor's configuration
             return motor->unitsToSteps(mm);
@@ -333,14 +333,14 @@ int32_t mm_to_steps(float mm, int axis) {
  */
 float steps_to_mm(int32_t steps, int axis) {
     // Safety check for global variable
-    extern MotorManager* motorManager; // Declare external reference
+    extern MotorManager* g_motorManager; // Declare external reference
     
     // Default conversion factor if motor manager is unavailable
     float stepsPerMm = 80.0f; // Standard value, will be overridden if motor info available
     
     // Safely attempt to get more accurate information if motorManager is available
-    if (motorManager != nullptr) {
-        Motor* motor = motorManager->getMotor(axis);
+    if (g_motorManager != nullptr) {
+        Motor* motor = g_motorManager->getMotor(axis);
         if (motor != nullptr) {
             // Use proper conversion from the motor's configuration
             return motor->stepsToUnits(steps);
