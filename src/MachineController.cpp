@@ -101,69 +101,133 @@
  }
  
  bool MachineController::moveTo(const std::vector<float> &positions, float feedrate, MovementType movementType)
- {
-   if (!motorManager) {
-     Debug::error("MachineController", "No motor manager available");
-     return false;
-   }
- 
-   if (positions.size() != motorManager->getNumMotors()) {
-     Debug::error("MachineController", "Position array size mismatch: " +
-                                           String(positions.size()) + " vs " + String(motorManager->getNumMotors()));
-     return false;
-   }
- 
-   // First convert work coordinates to machine coordinates WITHOUT clamping
-   std::vector<float> machinePos = positions;
-   for (size_t i = 0; i < machinePos.size() && i < workOffset.size(); i++) {
-     machinePos[i] += workOffset[i];
-   }
- 
-   // Now validate the machine (world) coordinates against limits
-   bool positionOutOfBounds = false;
-   String outOfBoundsMessage = "Position out of bounds: ";
-   std::vector<float> validatedMachinePos = machinePos;
- 
-   for (int i = 0; i < motorManager->getNumMotors(); i++) {
-     Motor *motor = motorManager->getMotor(i);
-     if (motor && !isnan(machinePos[i])) {
-       float clampedPos = machinePos[i];
-       if (!validatePosition(motor->getName(), machinePos[i], false, clampedPos)) {
-         positionOutOfBounds = true;
-         outOfBoundsMessage += motor->getName() + "=" + String(machinePos[i]) + " ";
-       }
-       validatedMachinePos[i] = clampedPos;
-     }
-   }
- 
-   // If any position is out of bounds, reject the move
-   if (positionOutOfBounds) {
-     Debug::error("MachineController", outOfBoundsMessage);
-     Serial.println("Error: " + outOfBoundsMessage);
-     return false;
-   }
- 
-   // Set current feedrate for future commands
-   currentFeedrate = feedrate;
- 
-   // Apply soft limits to ensure machine boundaries are respected
-   std::vector<float> constrainedMachinePos = applyMachineLimits(validatedMachinePos);
- 
-   // For kinematic machines, convert machine coordinates to motor positions
-   std::vector<float> targetMotorPos = machineToMotorPositions(constrainedMachinePos);
- 
-   // Use segmented motion planner if available
-   if (motionPlanner) {
+{
+  if (!motorManager) {
+    Debug::error("MachineController", "No motor manager available");
+    return false;
+  }
+
+  int numMotors = motorManager->getNumMotors();
+  
+  // Make sure we have at least some positions to move to
+  if (positions.empty()) {
+    Debug::error("MachineController", "Position array is empty");
+    return false;
+  }
+  
+  // If positions vector is smaller than the number of motors, pad it with current positions
+  std::vector<float> fullPositions = positions;
+  if (fullPositions.size() < numMotors) {
+    std::vector<float> currentPos = getCurrentWorkPosition();
+    fullPositions.resize(numMotors);
+    
+    // Copy current positions for any missing axes
+    for (int i = positions.size(); i < numMotors; i++) {
+      if (i < currentPos.size()) {
+        fullPositions[i] = currentPos[i];
+      } else {
+        fullPositions[i] = 0.0f;
+      }
+    }
+  }
+
+  // First convert work coordinates to machine coordinates WITHOUT clamping
+  std::vector<float> machinePos = fullPositions;
+  for (size_t i = 0; i < machinePos.size() && i < workOffset.size(); i++) {
+    machinePos[i] += workOffset[i];
+  }
+
+  // Now validate the machine (world) coordinates against limits
+  bool positionOutOfBounds = false;
+  String outOfBoundsMessage = "Position out of bounds: ";
+  std::vector<float> validatedMachinePos = machinePos;
+
+  for (int i = 0; i < motorManager->getNumMotors(); i++) {
+    Motor *motor = motorManager->getMotor(i);
+    if (motor && i < machinePos.size() && !isnan(machinePos[i])) {
+      float clampedPos = machinePos[i];
+      if (!validatePosition(motor->getName(), machinePos[i], false, clampedPos)) {
+        positionOutOfBounds = true;
+        outOfBoundsMessage += motor->getName() + "=" + String(machinePos[i]) + " ";
+      }
+      validatedMachinePos[i] = clampedPos;
+    }
+  }
+
+  // If any position is out of bounds, reject the move
+  if (positionOutOfBounds) {
+    Debug::error("MachineController", outOfBoundsMessage);
+    Serial.println("Error: " + outOfBoundsMessage);
+    return false;
+  }
+
+  // Set current feedrate for future commands
+  currentFeedrate = feedrate;
+
+  // Apply soft limits to ensure machine boundaries are respected
+  std::vector<float> constrainedMachinePos = applyMachineLimits(validatedMachinePos);
+
+  // For kinematic machines, convert machine coordinates to motor positions
+  std::vector<float> targetMotorPos = machineToMotorPositions(constrainedMachinePos);
+
+  // Use segmented motion planner if available
+  if (motionPlanner) {
     Debug::verbose("MachineController", "Move sent to the motion planner");
+    
+    // Create a target position vector with the right number of elements
+    std::vector<float> motionTargetPos;
+    
+    // Calculate target positions based on work coordinates
+    for (int i = 0; i < numMotors; i++) {
+      // If this position was in our original target, use it
+      if (i < positions.size()) {
+        motionTargetPos.push_back(positions[i]);
+      } 
+      // Otherwise use the current position
+      else if (i < getCurrentWorkPosition().size()) {
+        motionTargetPos.push_back(getCurrentWorkPosition()[i]);
+      }
+      // In case we're missing data, use 0
+      else {
+        motionTargetPos.push_back(0.0f);
+      }
+    }
+    
+    // Update velocity vector for telemetry
+    float feedrateInMMperSec = feedrate / 60.0f; // Convert from mm/min to mm/sec
+    
+    std::vector<float> velVector;
+    velVector.resize(numMotors, 0.0f);
+    
+    float moveDistance = 0.0f;
+    for (size_t i = 0; i < motionTargetPos.size() && i < getCurrentWorkPosition().size(); i++) {
+      float delta = motionTargetPos[i] - getCurrentWorkPosition()[i];
+      moveDistance += delta * delta;
+    }
+    moveDistance = sqrtf(moveDistance);
+    
+    if (moveDistance > 0.0001f) {
+      for (size_t i = 0; i < motionTargetPos.size() && i < getCurrentWorkPosition().size(); i++) {
+        float delta = motionTargetPos[i] - getCurrentWorkPosition()[i];
+        // Scale by feedrate to get velocity vector (convert back to mm/min)
+        velVector[i] = (delta / moveDistance) * feedrate;
+      }
+    }
+    
+    // Store velocity vector for telemetry
+    setCurrentDesiredVelocityVector(velVector);
+    
+    // Send move to appropriate planner function
     if (movementType == RAPID_MOTION) {
-      return motionPlanner->addRapidMove(targetMotorPos);
+      return motionPlanner->addRapidMove(motionTargetPos);
     } else {
-     return motionPlanner->addLinearMove(targetMotorPos, feedrate);
+      return motionPlanner->addLinearMove(motionTargetPos, feedrate);
     }
   } else {
-     Debug::error("MachineController", "No motion planner instanced");
-   }
- }
+    Debug::error("MachineController", "No motion planner instanced");
+    return false;
+  }
+}
  
  bool MachineController::moveTo(float x, float y, float z, float feedrate, MovementType movementType)
  {

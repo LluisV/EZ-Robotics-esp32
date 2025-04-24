@@ -42,6 +42,9 @@
  GCodeValidator *gCodeValidator = NULL;
  Scheduler *scheduler = NULL;
  
+ // Global pointer to motorManager for external modules like Planner
+ MotorManager* g_motorManager = nullptr;
+ 
  /**
   * @brief Communication task that runs on Core 0
   * Handles serial communication, file operations, and command preprocessing
@@ -227,7 +230,7 @@
  
                case GCodeParseResult::QUEUE_FULL:
                  Debug::warning("MotionTask", "Scheduler queue full, requeueing command: " + command);
-                 commandQueue->push(command, IMMEDIATE);
+                 commandQueue->push(command, MOTION);
                  break;
  
                case GCodeParseResult::SUCCESS:
@@ -239,19 +242,27 @@
        }
  
        // Only add a delay if nothing important is happening
-       if (!scheduler->hasMove()) {
+       if (scheduler && !scheduler->hasMove()) {
          vTaskDelay(1); // Only delay when idle
        }
      }
      catch (const std::exception &e)
      {
        Debug::error("MotionTask", "Exception caught: " + String(e.what()));
-       // Handle error...
+       
+       // Handle error - emergency stop in case of serious issues
+       if (machineController) {
+         machineController->emergencyStop();
+       }
      }
      catch (...)
      {
        Debug::error("MotionTask", "Unknown exception caught");
-       // Handle error...
+       
+       // Handle error - emergency stop in case of serious issues
+       if (machineController) {
+         machineController->emergencyStop();
+       }
      }
    }
  }
@@ -314,6 +325,9 @@
      Debug::error("Main", "Motor initialization failed - using safer defaults");
      Serial.println("Failed to initialize motors! Using safer defaults.");
    }
+   
+   // Set global pointer for external modules
+   g_motorManager = &motorManager;
  
    // 3. Initialize CommandQueue
    Debug::info("Main", "Creating CommandQueue");
@@ -486,8 +500,10 @@
    Debug::info("Main", "System initialization complete with FluidNC-style motion system");
    Serial.println("System ready with FluidNC-style motion system. Send G-code commands to begin.");
  }
-
+ 
  void loop()
  {
-  
+   // Main loop doesn't do anything as the work is done in the FreeRTOS tasks
+   // Just delay to keep watchdog happy
+   delay(1000);
  }

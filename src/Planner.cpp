@@ -59,15 +59,65 @@
   * @brief Initialize the motion plan subsystem
   */
  void Planner::init() {
-     Debug::info("Planner", "Initializing planner");
-     
-     if (block_buffer) {
-         delete[] block_buffer;
-     }
-     block_buffer = new plan_block_t[PLANNER_BUFFER_SIZE];
-     
-     reset();
- }
+    Debug::info("Planner", "Initializing planner");
+    
+    // Define the number of blocks to allocate (avoid magic numbers)
+    const uint8_t BUFFER_SIZE = 16;
+    
+    // Delete old block buffer if it exists
+    if (block_buffer != nullptr) {
+        Debug::verbose("Planner", "Releasing old block buffer");
+        delete[] block_buffer;
+        block_buffer = nullptr;
+    }
+    
+    // Allocate new block buffer with error handling
+    try {
+        block_buffer = new plan_block_t[BUFFER_SIZE];
+        if (block_buffer == nullptr) {
+            Debug::error("Planner", "Failed to allocate block buffer");
+            return;
+        }
+        // Initialize the buffer to all zeros
+        memset(block_buffer, 0, sizeof(plan_block_t) * BUFFER_SIZE);
+        Debug::verbose("Planner", "Block buffer allocated and initialized");
+    } catch (std::bad_alloc& e) {
+        Debug::error("Planner", "Memory allocation failed for block buffer: " + String(e.what()));
+        return;
+    } catch (...) {
+        Debug::error("Planner", "Unknown error allocating block buffer");
+        return;
+    }
+    
+    // Initialize the planner state
+    try {
+        // Reset planner state
+        memset(&pl, 0, sizeof(planner_t));
+        
+        // Initialize position vectors to safe defaults
+        for (int i = 0; i < MAX_N_AXIS; i++) {
+            pl.position[i] = 0;
+            pl.previous_unit_vec[i] = 0;
+        }
+        
+        pl.previous_nominal_speed = 0.0f;
+        
+        // Reset buffer pointers
+        block_buffer_tail = 0;
+        block_buffer_head = 0;
+        next_buffer_head = 1;
+        block_buffer_planned = 0;
+        
+        // Reset overrides to 100%
+        overrides.feed_rate = 100;
+        overrides.rapid_rate = 100;
+        
+        Debug::info("Planner", "Planner state initialized successfully");
+    } catch (...) {
+        Debug::error("Planner", "Error initializing planner state");
+        return;
+    }
+}
  
  /**
   * @brief Reset the motion plan subsystem
@@ -249,10 +299,73 @@
      return limit;
  }
  
- // Helper functions to convert between mm and steps
- // These should be defined elsewhere and included here
- extern int32_t mm_to_steps(float mm, int axis);
- extern float steps_to_mm(int32_t steps, int axis);
+/**
+ * @brief Convert millimeters to steps
+ * @param mm Distance in millimeters
+ * @param axis Axis index
+ * @return Number of steps
+ */
+int32_t mm_to_steps(float mm, int axis) {
+    // Safety check for global variable
+    extern MotorManager* motorManager; // Declare external reference 
+    
+    // Default conversion factor if motor manager is unavailable
+    float stepsPerMm = 80.0f; // Standard value, will be overridden if motor info available
+    
+    // Set axis name based on index, defaulting to X if out of range
+    String axisName = "X";
+    if (axis == 1) axisName = "Y";
+    else if (axis == 2) axisName = "Z";
+    else if (axis == 3) axisName = "A";
+    else if (axis == 4) axisName = "B";
+    else if (axis == 5) axisName = "C";
+    
+    // Safely attempt to get more accurate information if motorManager is available
+    if (motorManager != nullptr) {
+        Motor* motor = motorManager->getMotorByName(axisName);
+        if (motor != nullptr) {
+            // Use proper conversion from the motor's configuration
+            return motor->unitsToSteps(mm);
+        }
+    }
+    
+    // Fallback to simple calculation if motor information not available
+    return (int32_t)(mm * stepsPerMm);
+}
+
+/**
+ * @brief Convert steps to millimeters
+ * @param steps Number of steps
+ * @param axis Axis index
+ * @return Distance in millimeters
+ */
+float steps_to_mm(int32_t steps, int axis) {
+    // Safety check for global variable
+    extern MotorManager* motorManager; // Declare external reference
+    
+    // Default conversion factor if motor manager is unavailable
+    float stepsPerMm = 80.0f; // Standard value, will be overridden if motor info available
+    
+    // Set axis name based on index, defaulting to X if out of range
+    String axisName = "X";
+    if (axis == 1) axisName = "Y";
+    else if (axis == 2) axisName = "Z";
+    else if (axis == 3) axisName = "A";
+    else if (axis == 4) axisName = "B";
+    else if (axis == 5) axisName = "C";
+    
+    // Safely attempt to get more accurate information if motorManager is available
+    if (motorManager != nullptr) {
+        Motor* motor = motorManager->getMotorByName(axisName);
+        if (motor != nullptr) {
+            // Use proper conversion from the motor's configuration
+            return motor->stepsToUnits(steps);
+        }
+    }
+    
+    // Fallback to simple calculation if motor information not available
+    return steps / stepsPerMm;
+}
  
  /**
   * @brief Add a new linear movement to the buffer
@@ -261,143 +374,183 @@
   * @return True on success
   */
  bool Planner::buffer_line(float* target, plan_line_data_t* pl_data) {
-     // Prepare and initialize new block
-     plan_block_t* block = &block_buffer[block_buffer_head];
-     memset(block, 0, sizeof(plan_block_t));
-     
-     // Copy motion parameters
-     block->motion = pl_data->motion;
-     block->line_number = pl_data->line_number;
-     block->is_jog = pl_data->is_jog;
-     
-     // Convert target position to steps and calculate move distance
-     int32_t target_steps[MAX_N_AXIS], position_steps[MAX_N_AXIS];
-     float unit_vec[MAX_N_AXIS], delta_mm;
-     
-     // Get current position
-     for (int i = 0; i < MAX_N_AXIS; i++) {
-         position_steps[i] = pl.position[i];
-         // Calculate target position in steps
-         target_steps[i] = mm_to_steps(target[i], i);
-         // Calculate steps to move
-         block->steps[i] = labs(target_steps[i] - position_steps[i]);
-         // Update maximum step count
-         block->step_event_count = std::max(block->step_event_count, block->steps[i]);
-         // Calculate distance in mm
-         delta_mm = steps_to_mm(target_steps[i] - position_steps[i], i);
-         unit_vec[i] = delta_mm; // Temporarily store for unit vector calculation
-         // Set direction bits - bit enabled means negative direction
-         if (delta_mm < 0.0f) {
-             block->direction_bits |= (1 << i);
-         }
-     }
-     
-     // Check if this is a zero-length block (rare but possible)
-     if (block->step_event_count == 0) {
-         return false;
-     }
-     
-     // Calculate unit vector, millimeters of travel, and limit feed rate and acceleration
-     block->millimeters = convert_delta_vector_to_unit_vector(unit_vec);
-     block->acceleration = limit_acceleration_by_axis_maximum(unit_vec);
-     block->rapid_rate = limit_rate_by_axis_maximum(unit_vec);
-     
-     // Set programmed feed rate based on motion type
-     if (block->motion.rapidMotion) {
-         block->programmed_rate = block->rapid_rate;
-     } else {
-         block->programmed_rate = pl_data->feed_rate;
-         if (block->motion.inverseTime) {
-             block->programmed_rate *= block->millimeters;
-         }
-     }
-     
-     // Calculate the jerk-limited entry speed
-     if (block_buffer_head == block_buffer_tail) {
-         // First block - start from rest
-         block->entry_speed_sqr = 0.0f;
-         block->max_junction_speed_sqr = 0.0f;
-     } else {
-         // Calculate junction deviation based on cornering algorithm
-         float junction_cos_theta = 0.0f;
-         float junction_unit_vec[MAX_N_AXIS];
-         
-         // Calculate the cosine of the angle between vectors for junction speed limit
-         for (int i = 0; i < MAX_N_AXIS; i++) {
-             junction_cos_theta -= pl.previous_unit_vec[i] * unit_vec[i];
-             junction_unit_vec[i] = unit_vec[i] - pl.previous_unit_vec[i];
-         }
-         
-         // Compute junction limit
-         if (junction_cos_theta > 0.999999f) {
-             // Straight line or slight curve, slight junction deviation
-             block->max_junction_speed_sqr = MINIMUM_JUNCTION_SPEED * MINIMUM_JUNCTION_SPEED;
-         } else if (junction_cos_theta < -0.999999f) {
-             // Reversal (back on path), junction is infinite
-             block->max_junction_speed_sqr = SOME_LARGE_VALUE;
-         } else {
-             // Compute junction deviation
-             convert_delta_vector_to_unit_vector(junction_unit_vec);
-             float junction_acceleration = limit_acceleration_by_axis_maximum(junction_unit_vec);
-             
-             // Calculate junction speed using centripetal acceleration formula
-             float sin_theta_d2 = sqrtf(0.5f * (1.0f - junction_cos_theta));
-             
-             // Junction deviation - this would be configurable in a full system
-             float junction_deviation = 0.05f; // Example value, in mm
-             
-             block->max_junction_speed_sqr = std::max(
-                 MINIMUM_JUNCTION_SPEED * MINIMUM_JUNCTION_SPEED,
-                 (junction_acceleration * junction_deviation * sin_theta_d2) / (1.0f - sin_theta_d2)
-             );
-         }
-     }
-     
-     // Calculate initial entry speed based on previous block's exit speed
-     float nominal_speed = compute_profile_nominal_speed(block);
-     
-     // Compute the entry speed limit based on the minimum of:
-     // 1. Junction limit (cornering)
-     // 2. Nominal speed of this block
-     // 3. Nominal speed of the previous block
-     if (block_buffer_head == block_buffer_tail) {
-         // First block - start from rest
-         block->entry_speed_sqr = 0.0f;
-     } else {
-         // Otherwise, calculate entry speed limit
-         if (nominal_speed > pl.previous_nominal_speed) {
-             block->max_entry_speed_sqr = pl.previous_nominal_speed * pl.previous_nominal_speed;
-         } else {
-             block->max_entry_speed_sqr = nominal_speed * nominal_speed;
-         }
-         
-         // Apply junction limit if needed
-         if (block->max_entry_speed_sqr > block->max_junction_speed_sqr) {
-             block->max_entry_speed_sqr = block->max_junction_speed_sqr;
-         }
-         
-         // Initial entry speed - will be updated by planner_recalculate()
-         block->entry_speed_sqr = block->max_entry_speed_sqr;
-     }
-     
-     // Update planner variables
-     pl.previous_nominal_speed = nominal_speed;
-     
-     // Update previous unit vector and planner position
-     for (int i = 0; i < MAX_N_AXIS; i++) {
-         pl.previous_unit_vec[i] = unit_vec[i];
-         pl.position[i] = target_steps[i];
-     }
-     
-     // Update buffer head and next buffer head
-     block_buffer_head = next_buffer_head;
-     next_buffer_head = plan_next_block_index(block_buffer_head);
-     
-     // Recalculate the plan with the new block
-     planner_recalculate();
-     
-     return true;
- }
+    // Validate inputs
+    if (target == nullptr) {
+        Debug::error("Planner", "Buffer line called with null target");
+        return false;
+    }
+    
+    if (pl_data == nullptr) {
+        Debug::error("Planner", "Buffer line called with null planning data");
+        return false;
+    }
+    
+    // Validate block buffer exists
+    if (block_buffer == nullptr) {
+        Debug::error("Planner", "Block buffer is null - Planner not initialized");
+        return false;
+    }
+    
+    // Prepare and initialize new block
+    if (next_buffer_head == block_buffer_tail) {
+        Debug::warning("Planner", "Buffer full - cannot add move");
+        return false; // Buffer is full
+    }
+    
+    plan_block_t* block = &block_buffer[block_buffer_head];
+    memset(block, 0, sizeof(plan_block_t));
+    
+    // Copy motion parameters
+    block->motion = pl_data->motion;
+    block->line_number = pl_data->line_number;
+    block->is_jog = pl_data->is_jog;
+    
+    // Convert target position to steps and calculate move distance
+    int32_t target_steps[MAX_N_AXIS], position_steps[MAX_N_AXIS];
+    float unit_vec[MAX_N_AXIS], delta_mm;
+    
+    // Get current position
+    for (int i = 0; i < MAX_N_AXIS; i++) {
+        try {
+            position_steps[i] = pl.position[i];
+            
+            // Calculate target position in steps - safely handle potential exceptions
+            target_steps[i] = mm_to_steps(target[i], i);
+            
+            // Calculate steps to move
+            block->steps[i] = labs(target_steps[i] - position_steps[i]);
+            
+            // Update maximum step count - safely check boundaries
+            if (block->steps[i] > block->step_event_count) {
+                block->step_event_count = block->steps[i];
+            }
+            
+            // Calculate distance in mm
+            delta_mm = steps_to_mm(target_steps[i] - position_steps[i], i);
+            unit_vec[i] = delta_mm; // Temporarily store for unit vector calculation
+            
+            // Set direction bits - bit enabled means negative direction
+            if (delta_mm < 0.0f) {
+                block->direction_bits |= (1 << i);
+            }
+        } catch (std::exception& e) {
+            Debug::error("Planner", "Exception in buffer_line: " + String(e.what()));
+            return false;
+        } catch (...) {
+            Debug::error("Planner", "Unknown exception in buffer_line");
+            return false;
+        }
+    }
+    
+    // Check if this is a zero-length block (rare but possible)
+    if (block->step_event_count == 0) {
+        Debug::verbose("Planner", "Zero-length move rejected");
+        return false;
+    }
+    
+    // Calculate unit vector, millimeters of travel, and limit feed rate and acceleration
+    float moveLength = 0.0f;
+    try {
+        // Calculate the vector magnitude
+        for (int i = 0; i < MAX_N_AXIS; i++) {
+            moveLength += unit_vec[i] * unit_vec[i];
+        }
+        moveLength = sqrtf(moveLength);
+        
+        // Normalize the vector
+        if (moveLength > 0.000001f) {  // Avoid division by near-zero
+            for (int i = 0; i < MAX_N_AXIS; i++) {
+                unit_vec[i] /= moveLength;
+            }
+        }
+        
+        block->millimeters = moveLength;
+    } catch (...) {
+        Debug::error("Planner", "Exception calculating move length");
+        return false;
+    }
+    
+    // Set programmed feed rate based on motion type
+    try {
+        if (block->motion.rapidMotion) {
+            block->programmed_rate = limit_rate_by_axis_maximum(unit_vec);
+        } else {
+            block->programmed_rate = pl_data->feed_rate;
+            if (block->motion.inverseTime && moveLength > 0.0001f) {
+                block->programmed_rate *= moveLength;
+            }
+        }
+        
+        // Set a minimum feedrate
+        if (block->programmed_rate < MINIMUM_FEED_RATE) {
+            block->programmed_rate = MINIMUM_FEED_RATE;
+        }
+        
+        // Set a safe acceleration value
+        block->acceleration = limit_acceleration_by_axis_maximum(unit_vec);
+    } catch (...) {
+        Debug::error("Planner", "Exception setting feed rate");
+        return false;
+    }
+    
+    // Calculate the junction speed limits
+    try {
+        // First block - start from rest
+        if (block_buffer_head == block_buffer_tail) {
+            block->entry_speed_sqr = 0.0f;
+            block->max_junction_speed_sqr = 0.0f; 
+        } else {
+            // Calculate junction deviation based on cornering algorithm
+            float junction_cos_theta = 0.0f;
+            for (int i = 0; i < MAX_N_AXIS; i++) {
+                junction_cos_theta -= pl.previous_unit_vec[i] * unit_vec[i];
+            }
+            
+            // Compute junction limit
+            if (junction_cos_theta > 0.999999f) {
+                // Straight line or slight curve - minimal junction deviation
+                block->max_junction_speed_sqr = 0.01f; // Small value to ensure smooth transitions
+            } else {
+                // Use a conservative junction speed limit
+                block->max_junction_speed_sqr = std::min(
+                    pl.previous_nominal_speed * pl.previous_nominal_speed,
+                    block->programmed_rate * block->programmed_rate
+                ) * 0.5f;
+            }
+            
+            // Initial entry speed is junction limit
+            block->entry_speed_sqr = block->max_junction_speed_sqr;
+        }
+    } catch (...) {
+        Debug::error("Planner", "Exception calculating junction speed");
+        return false;
+    }
+    
+    try {
+        // Update planner variables
+        float nominal_speed = block->programmed_rate;
+        pl.previous_nominal_speed = nominal_speed;
+        
+        // Update previous unit vector and planner position
+        for (int i = 0; i < MAX_N_AXIS; i++) {
+            pl.previous_unit_vec[i] = unit_vec[i];
+            pl.position[i] = target_steps[i];
+        }
+        
+        // Update buffer head and next buffer head
+        block_buffer_head = next_buffer_head;
+        next_buffer_head = plan_next_block_index(block_buffer_head);
+        
+        // Recalculate the plan with the new block
+        planner_recalculate();
+        
+        Debug::verbose("Planner", "Successfully added move to buffer");
+        return true;
+    } catch (...) {
+        Debug::error("Planner", "Exception finalizing planner state");
+        return false;
+    }
+}
  
  /**
   * @brief Compute the nominal speed profile for a block
