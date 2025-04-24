@@ -76,13 +76,7 @@
     * @return Pointer to the motion planner
     */
    Scheduler* getMotionPlanner() { return motionPlanner; }
- 
-   /**
-    * @brief Execute a G-code command
-    * @param command G-code command
-    * @return True if successful, false otherwise
-    */
-   bool executeGCode(const String &command);
+
  
    /**
     * @brief Get the current position in world coordinates

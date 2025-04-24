@@ -6,8 +6,11 @@
  #include "MachineController.h"
  #include "Debug.h"
  #include "Scheduler.h"
-
+ #include "Stepper.h"
  
+ // External access to the scheduler for direct velocity reporting
+ extern Scheduler* scheduler;
+  
  MachineController::MachineController(MotorManager *motorManager, ConfigManager *configManager)
      : motorManager(motorManager),
        configManager(configManager),
@@ -16,21 +19,23 @@
        absoluteMode(true),
        motionPlanner(nullptr)
  {
+   Debug::info("MachineController", "Initializing MachineController");
+   
    // Initialize work offset to zero
    if (motorManager) {
      workOffset.resize(motorManager->getNumMotors(), 0.0f);
      desiredVelocityVector.resize(motorManager->getNumMotors(), 0.0f);
    }
  }
- 
+  
  bool MachineController::initialize()
  {
    if (!motorManager) {
-     Serial.println("Invalid motor manager");
+     Debug::error("MachineController", "Invalid motor manager");
      return false;
    }
    if (!configManager) {
-     Serial.println("Invalid config manager");
+     Debug::error("MachineController", "Invalid config manager");
      return false;
    }
  
@@ -39,21 +44,22 @@
  
    // Initialize work offset to zero for all motors
    workOffset.resize(motorManager->getNumMotors(), 0.0f);
- 
-   Serial.println("Machine controller initialized");
+   
+   Debug::info("MachineController", "Machine controller initialized successfully");
    return true;
  }
- 
+  
  void MachineController::setMotionPlanner(Scheduler* motionPlanner) {
    this->motionPlanner = motionPlanner;
    Debug::info("MachineController", "Segmented motion planner connected");
  }
- 
+  
  std::vector<float> MachineController::getCurrentWorldPosition() const
  {
    std::vector<float> positions;
  
    if (!motorManager) {
+     Debug::warning("MachineController", "No motor manager available for position query");
      return positions;
    }
  
@@ -68,7 +74,7 @@
  
    return positions;
  }
- 
+  
  std::vector<float> MachineController::getCurrentWorkPosition() const
  {
    // Get world positions
@@ -81,162 +87,185 @@
  
    return worldPositions;
  }
- 
+  
  bool MachineController::homeAll()
  {
    if (!motorManager) {
+     Debug::error("MachineController", "Cannot home - no motor manager available");
      return false;
    }
  
+   Debug::info("MachineController", "Homing all axes");
    return motorManager->homeAll();
  }
- 
+  
  bool MachineController::homeAxis(const String &axisName)
  {
    if (!motorManager) {
+     Debug::error("MachineController", "Cannot home axis - no motor manager available");
      return false;
    }
  
+   Debug::info("MachineController", "Homing axis: " + axisName);
    return motorManager->homeMotorByName(axisName);
  }
- 
+  
  bool MachineController::moveTo(const std::vector<float> &positions, float feedrate, MovementType movementType)
-{
-  if (!motorManager) {
-    Debug::error("MachineController", "No motor manager available");
-    return false;
-  }
-
-  int numMotors = motorManager->getNumMotors();
-  
-  // Make sure we have at least some positions to move to
-  if (positions.empty()) {
-    Debug::error("MachineController", "Position array is empty");
-    return false;
-  }
-  
-  // If positions vector is smaller than the number of motors, pad it with current positions
-  std::vector<float> fullPositions = positions;
-  if (fullPositions.size() < numMotors) {
-    std::vector<float> currentPos = getCurrentWorkPosition();
-    fullPositions.resize(numMotors);
-    
-    // Copy current positions for any missing axes
-    for (int i = positions.size(); i < numMotors; i++) {
-      if (i < currentPos.size()) {
-        fullPositions[i] = currentPos[i];
-      } else {
-        fullPositions[i] = 0.0f;
-      }
-    }
-  }
-
-  // First convert work coordinates to machine coordinates WITHOUT clamping
-  std::vector<float> machinePos = fullPositions;
-  for (size_t i = 0; i < machinePos.size() && i < workOffset.size(); i++) {
-    machinePos[i] += workOffset[i];
-  }
-
-  // Now validate the machine (world) coordinates against limits
-  bool positionOutOfBounds = false;
-  String outOfBoundsMessage = "Position out of bounds: ";
-  std::vector<float> validatedMachinePos = machinePos;
-
-  for (int i = 0; i < motorManager->getNumMotors(); i++) {
-    Motor *motor = motorManager->getMotor(i);
-    if (motor && i < machinePos.size() && !isnan(machinePos[i])) {
-      float clampedPos = machinePos[i];
-      if (!validatePosition(motor->getName(), machinePos[i], false, clampedPos)) {
-        positionOutOfBounds = true;
-        outOfBoundsMessage += motor->getName() + "=" + String(machinePos[i]) + " ";
-      }
-      validatedMachinePos[i] = clampedPos;
-    }
-  }
-
-  // If any position is out of bounds, reject the move
-  if (positionOutOfBounds) {
-    Debug::error("MachineController", outOfBoundsMessage);
-    Serial.println("Error: " + outOfBoundsMessage);
-    return false;
-  }
-
-  // Set current feedrate for future commands
-  currentFeedrate = feedrate;
-
-  // Apply soft limits to ensure machine boundaries are respected
-  std::vector<float> constrainedMachinePos = applyMachineLimits(validatedMachinePos);
-
-  // For kinematic machines, convert machine coordinates to motor positions
-  std::vector<float> targetMotorPos = machineToMotorPositions(constrainedMachinePos);
-
-  // Use segmented motion planner if available
-  if (motionPlanner) {
-    Debug::verbose("MachineController", "Move sent to the motion planner");
-    
-    // Create a target position vector with the right number of elements
-    std::vector<float> motionTargetPos;
-    
-    // Calculate target positions based on work coordinates
-    for (int i = 0; i < numMotors; i++) {
-      // If this position was in our original target, use it
-      if (i < positions.size()) {
-        motionTargetPos.push_back(positions[i]);
-      } 
-      // Otherwise use the current position
-      else if (i < getCurrentWorkPosition().size()) {
-        motionTargetPos.push_back(getCurrentWorkPosition()[i]);
-      }
-      // In case we're missing data, use 0
-      else {
-        motionTargetPos.push_back(0.0f);
-      }
-    }
-    
-    // Update velocity vector for telemetry
-    float feedrateInMMperSec = feedrate / 60.0f; // Convert from mm/min to mm/sec
-    
-    std::vector<float> velVector;
-    velVector.resize(numMotors, 0.0f);
-    
-    float moveDistance = 0.0f;
-    for (size_t i = 0; i < motionTargetPos.size() && i < getCurrentWorkPosition().size(); i++) {
-      float delta = motionTargetPos[i] - getCurrentWorkPosition()[i];
-      moveDistance += delta * delta;
-    }
-    moveDistance = sqrtf(moveDistance);
-    
-    if (moveDistance > 0.0001f) {
-      for (size_t i = 0; i < motionTargetPos.size() && i < getCurrentWorkPosition().size(); i++) {
-        float delta = motionTargetPos[i] - getCurrentWorkPosition()[i];
-        // Scale by feedrate to get velocity vector (convert back to mm/min)
-        velVector[i] = (delta / moveDistance) * feedrate;
-      }
-    }
-    
-    // Store velocity vector for telemetry
-    setCurrentDesiredVelocityVector(velVector);
-    
-    // Send move to appropriate planner function
-    try {
-      if (movementType == RAPID_MOTION) {
-        return motionPlanner->addRapidMove(motionTargetPos);
-      } else {
-        return motionPlanner->addLinearMove(motionTargetPos, feedrate);
-      }
-    } catch (std::exception& e) {
-      Debug::error("MachineController", "Exception in motion planning: " + String(e.what()));
-      return false;
-    } catch (...) {
-      Debug::error("MachineController", "Unknown exception in motion planning");
-      return false;
-    }
-  } else {
-    Debug::error("MachineController", "No motion planner instanced");
-    return false;
-  }
-}
+ {
+   if (!motorManager) {
+     Debug::error("MachineController", "No motor manager available");
+     return false;
+   }
  
+   int numMotors = motorManager->getNumMotors();
+   
+   // Make sure we have at least some positions to move to
+   if (positions.empty()) {
+     Debug::error("MachineController", "Position array is empty");
+     return false;
+   }
+   
+   // If positions vector is smaller than the number of motors, pad it with current positions
+   std::vector<float> fullPositions = positions;
+   if (fullPositions.size() < numMotors) {
+     std::vector<float> currentPos = getCurrentWorkPosition();
+     fullPositions.resize(numMotors);
+     
+     // Copy current positions for any missing axes
+     for (int i = positions.size(); i < numMotors; i++) {
+       if (i < currentPos.size()) {
+         fullPositions[i] = currentPos[i];
+       } else {
+         fullPositions[i] = 0.0f;
+       }
+     }
+   }
+ 
+   // First convert work coordinates to machine coordinates WITHOUT clamping
+   std::vector<float> machinePos = fullPositions;
+   for (size_t i = 0; i < machinePos.size() && i < workOffset.size(); i++) {
+     machinePos[i] += workOffset[i];
+   }
+ 
+   // Now validate the machine (world) coordinates against limits
+   bool positionOutOfBounds = false;
+   String outOfBoundsMessage = "Position out of bounds: ";
+   std::vector<float> validatedMachinePos = machinePos;
+ 
+   for (int i = 0; i < motorManager->getNumMotors(); i++) {
+     Motor *motor = motorManager->getMotor(i);
+     if (motor && i < machinePos.size() && !isnan(machinePos[i])) {
+       float clampedPos = machinePos[i];
+       if (!validatePosition(motor->getName(), machinePos[i], false, clampedPos)) {
+         positionOutOfBounds = true;
+         outOfBoundsMessage += motor->getName() + "=" + String(machinePos[i]) + " ";
+       }
+       validatedMachinePos[i] = clampedPos;
+     }
+   }
+ 
+   // If any position is out of bounds, reject the move
+   if (positionOutOfBounds) {
+     Debug::error("MachineController", outOfBoundsMessage);
+     Serial.println("Error: " + outOfBoundsMessage);
+     return false;
+   }
+ 
+   // Set current feedrate for future commands
+   currentFeedrate = feedrate;
+ 
+   // Apply soft limits to ensure machine boundaries are respected
+   std::vector<float> constrainedMachinePos = applyMachineLimits(validatedMachinePos);
+ 
+   // For kinematic machines, convert machine coordinates to motor positions
+   std::vector<float> targetMotorPos = machineToMotorPositions(constrainedMachinePos);
+ 
+   // Use segmented motion planner if available
+   if (motionPlanner) {
+     Debug::verbose("MachineController", "Move sent to the motion planner");
+     
+     // Create a target position vector with the right number of elements
+     std::vector<float> motionTargetPos;
+     
+     // Calculate target positions based on work coordinates
+     for (int i = 0; i < numMotors; i++) {
+       // If this position was in our original target, use it
+       if (i < positions.size()) {
+         motionTargetPos.push_back(positions[i]);
+       } 
+       // Otherwise use the current position
+       else if (i < getCurrentWorkPosition().size()) {
+         motionTargetPos.push_back(getCurrentWorkPosition()[i]);
+       }
+       // In case we're missing data, use 0
+       else {
+         motionTargetPos.push_back(0.0f);
+       }
+     }
+     
+     // Update velocity vector for telemetry
+     float feedrateInMMperSec = feedrate / 60.0f; // Convert from mm/min to mm/sec
+     
+     std::vector<float> velVector;
+     velVector.resize(numMotors, 0.0f);
+     
+     float moveDistance = 0.0f;
+     for (size_t i = 0; i < motionTargetPos.size() && i < getCurrentWorkPosition().size(); i++) {
+       float delta = motionTargetPos[i] - getCurrentWorkPosition()[i];
+       moveDistance += delta * delta;
+     }
+     moveDistance = sqrtf(moveDistance);
+     
+     if (moveDistance > 0.0001f) {
+       for (size_t i = 0; i < motionTargetPos.size() && i < getCurrentWorkPosition().size(); i++) {
+         float delta = motionTargetPos[i] - getCurrentWorkPosition()[i];
+         // Scale by feedrate to get velocity vector (convert back to mm/min)
+         velVector[i] = (delta / moveDistance) * feedrate;
+       }
+     }
+     
+     // Store velocity vector for telemetry
+     setCurrentDesiredVelocityVector(velVector);
+     
+     // Log the move distance and velocity for debugging
+     Debug::info("MachineController", "Sending move: distance=" + String(moveDistance) + 
+                "mm, feedrate=" + String(feedrate) + "mm/min");
+     
+     // If there's a previous move pending, make sure to wake the stepper system
+     if (Stepper::get_current_block() == nullptr) {
+       Debug::info("MachineController", "No current move in progress - ensuring stepper is awake");
+       Stepper::wake_up();
+     }
+     
+     // Send move to appropriate planner function
+     try {
+       bool result;
+       if (movementType == RAPID_MOTION) {
+         result = motionPlanner->addRapidMove(motionTargetPos);
+       } else {
+         result = motionPlanner->addLinearMove(motionTargetPos, feedrate);
+       }
+       
+       if (!result) {
+         Debug::error("MachineController", "Motion planner rejected the move");
+         return false;
+       }
+       
+       Debug::info("MachineController", "Move accepted by motion planner");
+       return true;
+     } catch (std::exception& e) {
+       Debug::error("MachineController", "Exception in motion planning: " + String(e.what()));
+       return false;
+     } catch (...) {
+       Debug::error("MachineController", "Unknown exception in motion planning");
+       return false;
+     }
+   } else {
+     Debug::error("MachineController", "No motion planner available");
+     return false;
+   }
+ }
+  
  bool MachineController::moveTo(float x, float y, float z, float feedrate, MovementType movementType)
  {
    std::vector<float> positions;
@@ -251,281 +280,41 @@
    positions = currentPos;
  
    // Update positions for X, Y, Z if they exist and values are specified
-   if (xMotor && !isnan(x))
-   {
-     int index = motorManager->getMotor(0)->getName() == "X" ? 0 : motorManager->getMotor(1)->getName() == "X" ? 1
-                                                                                                               : 2; // Assuming X, Y, Z are the first three motors
+   if (xMotor && !isnan(x)) {
+     int index = motorManager->getMotor(0)->getName() == "X" ? 0 : 
+                 motorManager->getMotor(1)->getName() == "X" ? 1 : 2;
      positions[index] = x;
    }
  
-   if (yMotor && !isnan(y))
-   {
-     int index = motorManager->getMotor(0)->getName() == "Y" ? 0 : motorManager->getMotor(1)->getName() == "Y" ? 1
-                                                                                                               : 2; // Assuming X, Y, Z are the first three motors
+   if (yMotor && !isnan(y)) {
+     int index = motorManager->getMotor(0)->getName() == "Y" ? 0 : 
+                 motorManager->getMotor(1)->getName() == "Y" ? 1 : 2;
      positions[index] = y;
    }
  
-   if (zMotor && !isnan(z))
-   {
-     int index = motorManager->getMotor(0)->getName() == "Z" ? 0 : motorManager->getMotor(1)->getName() == "Z" ? 1
-                                                                                                               : 2; // Assuming X, Y, Z are the first three motors
+   if (zMotor && !isnan(z)) {
+     int index = motorManager->getMotor(0)->getName() == "Z" ? 0 : 
+                 motorManager->getMotor(1)->getName() == "Z" ? 1 : 2;
      positions[index] = z;
    }
  
+   Debug::info("MachineController", "Move to: X=" + String(x) + " Y=" + String(y) + 
+               " Z=" + String(z) + " F=" + String(feedrate));
    return moveTo(positions, feedrate, movementType);
  }
- 
- 
- bool MachineController::executeGCode(const String &command)
- {
-   // This is a simplified G-code interpreter
- 
-   // Remove comments and trim
-   String code = command;
-   int commentIndex = code.indexOf(';');
-   if (commentIndex != -1)
-   {
-     code = code.substring(0, commentIndex);
-   }
-   code.trim();
- 
-   if (code.length() == 0)
-   {
-     return true; // Empty line or comment-only line
-   }
- 
-   // Extract command letter and number
-   char letter = code.charAt(0);
-   float value = 0.0f;
- 
-   if (code.length() > 1)
-   {
-     value = code.substring(1).toFloat();
-   }
- 
-   // Extract parameters
-   float x = NAN, y = NAN, z = NAN, f = NAN;
- 
-   int idx = 0;
-   while (idx < code.length())
-   {
-     if (idx + 1 < code.length())
-     {
-       char paramLetter = code.charAt(idx);
- 
-       // Find the next parameter or end of string
-       int nextIdx = idx + 1;
-       while (nextIdx < code.length() &&
-              !isalpha(code.charAt(nextIdx)))
-       {
-         nextIdx++;
-       }
- 
-       // Extract the value
-       if (nextIdx > idx + 1)
-       {
-         String valueStr = code.substring(idx + 1, nextIdx);
-         float paramValue = valueStr.toFloat();
- 
-         // Store the parameter
-         switch (paramLetter)
-         {
-         case 'X':
-         case 'x':
-           x = paramValue;
-           break;
-         case 'Y':
-         case 'y':
-           y = paramValue;
-           break;
-         case 'Z':
-         case 'z':
-           z = paramValue;
-           break;
-         case 'F':
-         case 'f':
-           f = paramValue;
-           break;
-         }
-       }
- 
-       idx = nextIdx;
-     }
-     else
-     {
-       idx++;
-     }
-   }
- 
-   // Interpret G-codes
-   if (letter == 'G' || letter == 'g')
-   {
-     if (value == 0)
-     {
-       // G0: Rapid move
-       if (!isnan(f))
-       {
-         currentFeedrate = f;
-       }
- 
-       // Handle relative mode
-       std::vector<float> currentPos = getCurrentWorkPosition();
-       if (!absoluteMode)
-       {
-         if (!isnan(x))
-           x += currentPos[0];
-         if (!isnan(y))
-           y += currentPos[1];
-         if (!isnan(z))
-           z += currentPos[2];
-       }
- 
-       if (!isnan(x) || !isnan(y) || !isnan(z))
-       {
-         float xPos = isnan(x) ? currentPos[0] : x;
-         float yPos = isnan(y) ? currentPos[1] : y;
-         float zPos = isnan(z) ? currentPos[2] : z;
- 
-         return moveTo(xPos, yPos, zPos, currentFeedrate, RAPID_MOTION);
-       }
-     }
-     else if (value == 1)
-     {
-       // G1: Linear move
-       if (!isnan(f))
-       {
-         currentFeedrate = f;
-       }
- 
-       // Handle relative mode
-       std::vector<float> currentPos = getCurrentWorkPosition();
-       if (!absoluteMode)
-       {
-         if (!isnan(x))
-           x += currentPos[0];
-         if (!isnan(y))
-           y += currentPos[1];
-         if (!isnan(z))
-           z += currentPos[2];
-       }
- 
-       if (!isnan(x) || !isnan(y) || !isnan(z))
-       {
-         float xPos = isnan(x) ? currentPos[0] : x;
-         float yPos = isnan(y) ? currentPos[1] : y;
-         float zPos = isnan(z) ? currentPos[2] : z;
- 
-         return moveTo(xPos, yPos, zPos, currentFeedrate, LINEAR_MOTION);
-       }
-     }
-     else if (value == 28)
-     {
-       // G28: Home
-       if (isnan(x) && isnan(y) && isnan(z))
-       {
-         // Home all axes
-         return homeAll();
-       }
-       else
-       {
-         // Home specific axes
-         bool success = true;
-         if (!isnan(x))
-           success &= homeAxis("X");
-         if (!isnan(y))
-           success &= homeAxis("Y");
-         if (!isnan(z))
-           success &= homeAxis("Z");
-         return success;
-       }
-     }
-     else if (value == 90)
-     {
-       // G90: Set to absolute positioning
-       absoluteMode = true;
-       return true;
-     }
-     else if (value == 91)
-     {
-       // G91: Set to relative positioning
-       absoluteMode = false;
-       return true;
-     }
-     else if (value == 92)
-     {
-       // G92: Set position
-       std::vector<float> currentPos = getCurrentWorldPosition();
- 
-       if (!isnan(x))
-         workOffset[0] = motorManager->getMotorByName("X")->getPositionInUnits() - x;
-       if (!isnan(y))
-         workOffset[1] = motorManager->getMotorByName("Y")->getPositionInUnits() - y;
-       if (!isnan(z))
-         workOffset[2] = motorManager->getMotorByName("Z")->getPositionInUnits() - z;
- 
-       return true;
-     }
-   }
-   else if (letter == 'M' || letter == 'm')
-   {
-     if (value == 0 || value == 1)
-     {
-       // M0/M1: Program pause
-       // No implementation needed here
-       return true;
-     }
-     else if (value == 2 || value == 30)
-     {
-       // M2/M30: Program end
-       // No implementation needed here
-       return true;
-     }
-     else if (value == 3)
-     {
-       // M3: Spindle on clockwise
-       // Not implemented in this version
-       return true;
-     }
-     else if (value == 4)
-     {
-       // M4: Spindle on counterclockwise
-       // Not implemented in this version
-       return true;
-     }
-     else if (value == 5)
-     {
-       // M5: Spindle off
-       // Not implemented in this version
-       return true;
-     }
-     else if (value == 112)
-     {
-       // M112: Emergency stop
-       emergencyStop();
-       return true;
-     }
-   }
- 
-   // Unrecognized command
-   Serial.println("Unrecognized G-code: " + command);
-   return false;
- }
- 
+
+  
  float MachineController::getCurrentAxisPosition(const String &axisName) const
  {
-   if (!motorManager)
-   {
+   if (!motorManager) {
      return 0.0f;
    }
  
    Motor *motor = motorManager->getMotorByName(axisName);
-   if (motor)
-   {
+   if (motor) {
      int index = 0;
-     for (int i = 0; i < motorManager->getNumMotors(); i++)
-     {
-       if (motorManager->getMotor(i)->getName() == axisName)
-       {
+     for (int i = 0; i < motorManager->getNumMotors(); i++) {
+       if (motorManager->getMotor(i)->getName() == axisName) {
          index = i;
          break;
        }
@@ -536,24 +325,34 @@
  
    return 0.0f;
  }
- 
+  
  bool MachineController::isMoving() const
  {
-   if (!motorManager)
-   {
+   if (!motorManager) {
      return false;
    }
  
-   return motorManager->isAnyMotorMoving();
+   // Check both the motor manager and the stepper system for active movement
+   if (motorManager->isAnyMotorMoving()) {
+     return true;
+   }
+   
+   // Also check if the scheduler or stepper system reports active movement
+   if (Stepper::get_current_block() != nullptr) {
+     Debug::verbose("MachineController", "Motion detected in stepper system");
+     return true;
+   }
+   
+   return false;
  }
- 
+  
  void MachineController::emergencyStop()
  {
-   if (!motorManager)
-   {
+   if (!motorManager) {
      return;
    }
  
+   Debug::error("MachineController", "EMERGENCY STOP TRIGGERED");
    Serial.println("EMERGENCY STOP");
    motorManager->stopAll(true);
  
@@ -561,16 +360,18 @@
    if (motionPlanner) {
      motionPlanner->clear();
    }
+   
+   // Also stop the stepper execution system
+   Stepper::stop_stepping();
  }
- 
+  
  void MachineController::setWorkOffset(const std::vector<float> &offsets)
  {
-   if (offsets.size() == workOffset.size())
-   {
+   if (offsets.size() == workOffset.size()) {
      workOffset = offsets;
    }
  }
- 
+  
  std::vector<float> MachineController::machineToMotorPositions(const std::vector<float> &machinePos)
  {
    // In a simple Cartesian machine, machine coordinates are the same as motor positions
@@ -578,21 +379,20 @@
    // TODO: Implement kinematics transformation when kinematics module is added
    return machinePos;
  }
- 
+  
  std::vector<float> MachineController::workToMachinePositions(const std::vector<float> &workPos)
  {
    std::vector<float> machinePos = workPos;
  
    // Apply work offset to get machine coordinates
-   for (size_t i = 0; i < machinePos.size() && i < workOffset.size(); i++)
-   {
+   for (size_t i = 0; i < machinePos.size() && i < workOffset.size(); i++) {
      machinePos[i] += workOffset[i];
    }
  
    // Apply machine limits to ensure we stay within bounds
    return applyMachineLimits(machinePos);
  }
- 
+  
  bool MachineController::validatePosition(const String &motorName, float position, bool clampToLimits, float &clampedPosition)
  {
    // Default to the input position
@@ -601,13 +401,11 @@
    // Find the motor's configuration
    const MotorConfig *motorConfig = nullptr;
  
-   if (configManager)
-   {
+   if (configManager) {
      motorConfig = configManager->getMotorConfigByName(motorName);
    }
  
-   if (!motorConfig)
-   {
+   if (!motorConfig) {
      Debug::warning("MachineController", "No config found for motor " + motorName + " during limit validation");
      return true; // Allow movement if we can't find config (safer than blocking)
    }
@@ -619,26 +417,21 @@
    // Check if position is within limits
    bool withinLimits = true;
  
-   if (position < minLimit)
-   {
+   if (position < minLimit) {
      Debug::warning("MachineController", motorName + " position " + String(position) +
-                                             " below minimum limit of " + String(minLimit));
+                                            " below minimum limit of " + String(minLimit));
      withinLimits = false;
  
-     if (clampToLimits)
-     {
+     if (clampToLimits) {
        clampedPosition = minLimit;
        Debug::info("MachineController", "Clamping " + motorName + " to minimum limit " + String(minLimit));
      }
-   }
-   else if (position > maxLimit)
-   {
+   } else if (position > maxLimit) {
      Debug::warning("MachineController", motorName + " position " + String(position) +
-                                             " exceeds maximum limit of " + String(maxLimit));
+                                            " exceeds maximum limit of " + String(maxLimit));
      withinLimits = false;
  
-     if (clampToLimits)
-     {
+     if (clampToLimits) {
        clampedPosition = maxLimit;
        Debug::info("MachineController", "Clamping " + motorName + " to maximum limit " + String(maxLimit));
      }
@@ -646,33 +439,26 @@
  
    return withinLimits || clampToLimits;
  }
- 
+  
  std::vector<float> MachineController::applyMachineLimits(const std::vector<float> &machinePos)
  {
    std::vector<float> constrainedPos = machinePos;
  
    // Apply soft limits by clamping to machine boundaries
-   for (size_t i = 0; i < constrainedPos.size(); i++)
-   {
-     if (i < motorManager->getNumMotors())
-     {
+   for (size_t i = 0; i < constrainedPos.size(); i++) {
+     if (i < motorManager->getNumMotors()) {
        Motor *motor = motorManager->getMotor(i);
-       if (motor)
-       {
+       if (motor) {
          const MotorConfig *config = motor->getConfig();
-         if (config)
-         {
+         if (config) {
            // Clamp to machine limits
-           if (constrainedPos[i] < config->minPosition)
-           {
+           if (constrainedPos[i] < config->minPosition) {
              Debug::warning("MachineController", "Clamping " + motor->getName() +
-                                                     " position to minimum limit (" + String(config->minPosition) + ")");
+                                                    " position to minimum limit (" + String(config->minPosition) + ")");
              constrainedPos[i] = config->minPosition;
-           }
-           else if (constrainedPos[i] > config->maxPosition)
-           {
+           } else if (constrainedPos[i] > config->maxPosition) {
              Debug::warning("MachineController", "Clamping " + motor->getName() +
-                                                     " position to maximum limit (" + String(config->maxPosition) + ")");
+                                                    " position to maximum limit (" + String(config->maxPosition) + ")");
              constrainedPos[i] = config->maxPosition;
            }
          }
@@ -682,86 +468,81 @@
  
    return constrainedPos;
  }
-
+ 
  std::vector<float> MachineController::getCurrentVelocityVector() const
-{
+ {
+   // This has been completely rewritten to use the stepper system directly
    std::vector<float> velocityVector;
-   
+    
    if (!motorManager) {
+     Debug::warning("MachineController", "No motor manager available for velocity query");
      return velocityVector;
    }
-   
+    
    int numMotors = motorManager->getNumMotors();
    velocityVector.resize(numMotors, 0.0f);
    
-   // Get the current velocities of all motors in their native units
-   for (int i = 0; i < numMotors; i++) {
-     Motor *motor = motorManager->getMotor(i);
-     if (motor && motor->isMoving()) {
-       // Get motor speed in steps/sec (already converted in getCurrentSpeedSteps)
-       float currentSpeedSteps = motor->getCurrentSpeedSteps();
+   // Get velocity from the stepper module if we're actually moving
+   if (Stepper::get_current_block() != nullptr) {
+     // Get scalar velocity from stepper
+     float realtime_rate = Stepper::get_realtime_rate();
+     
+     // There's no easy way to get the per-axis velocity from the stepper module directly,
+     // so we approximate it based on the desired velocity vector direction
+     // but scale it to the actual current velocity magnitude
+     if (desiredVelocityVector.size() > 0) {
+       // First calculate the magnitude of our desired vector
+       float desired_magnitude = 0.0f;
+       for (size_t i = 0; i < desiredVelocityVector.size(); i++) {
+         desired_magnitude += desiredVelocityVector[i] * desiredVelocityVector[i];
+       }
+       desired_magnitude = sqrtf(desired_magnitude);
        
-       // Convert from steps/sec to units/sec (mm/sec or deg/sec)
-       float unitsPerStep = motor->stepsToUnits(1);
-       float speedInUnitsPerSec = currentSpeedSteps * unitsPerStep;
-       
-       // Convert from units/sec to units/min (mm/min or deg/min)
-       float speedInUnitsPerMin = speedInUnitsPerSec * 60.0f;
-       
-       velocityVector[i] = speedInUnitsPerMin;
+       // Now scale the desired vector direction to the actual velocity magnitude
+       if (desired_magnitude > 0.001f) {
+         for (size_t i = 0; i < desiredVelocityVector.size() && i < velocityVector.size(); i++) {
+           velocityVector[i] = (desiredVelocityVector[i] / desired_magnitude) * realtime_rate;
+         }
+         
+         Debug::verbose("MachineController", "Velocity from stepper: " + String(realtime_rate) + " mm/min");
+       }
      }
    }
-
-   // Apply kinematics if needed (left as-is)
-   if (kinematics) {
-     // For now, just pass through motor velocities
-     return velocityVector;
-   } else {
-     // Default case - assume Cartesian kinematics
-     return velocityVector;
-   }
-}
-
+   
+   return velocityVector;
+ }
+ 
  float MachineController::getCurrentVelocity() const
-{
-  if (!isMoving()) {
-    return 0.0f;
-  }
-  
-  // Get velocities in cartesian space (already in mm/min after the modification above)
-  std::vector<float> velocityVector = getCurrentVelocityVector();
-  
-  // Calculate magnitude of velocity vector - Euclidean norm
-  float sumOfSquares = 0.0f;
-  for (const float &axisVelocity : velocityVector) {
-    sumOfSquares += axisVelocity * axisVelocity;
-  }
-  
-  return sqrt(sumOfSquares);
-}
-
-void MachineController::setCurrentDesiredVelocityVector(std::vector<float> velocities)
-{
-  desiredVelocityVector = velocities;
-}
-
-
-std::vector<float> MachineController::getCurrentDesiredVelocityVector() const
-{
+ {
+   // Get the current velocity directly from the stepper system for accuracy
+   if (Stepper::get_current_block() != nullptr) {
+     float velocity = Stepper::get_realtime_rate();
+     Debug::verbose("MachineController", "Current velocity from stepper: " + String(velocity) + " mm/min");
+     return velocity;
+   }
+   
+   // If no blocks are active, we're not moving
+   Debug::verbose("MachineController", "No active stepper blocks - velocity is 0");
+   return 0.0f;
+ }
+ 
+ void MachineController::setCurrentDesiredVelocityVector(std::vector<float> velocities)
+ {
+   desiredVelocityVector = velocities;
+ }
+ 
+ std::vector<float> MachineController::getCurrentDesiredVelocityVector() const
+ {
    return desiredVelocityVector;
-}
-
+ }
+ 
  float MachineController::getCurrentDesiredVelocity() const
-{
-  
-  // Get velocities in cartesian space (already in mm/min after the modification above)
-  std::vector<float> velocityVector = getCurrentDesiredVelocityVector();
-  
-  // Calculate magnitude of velocity vector - Euclidean norm
-  float sumOfSquares = 0.0f;
-  for (const float &axisVelocity : velocityVector) {
-    sumOfSquares += axisVelocity * axisVelocity;
-  }
-  
-  return sqrt(sumOfSquares);
-}
+ {
+   // Calculate magnitude of velocity vector - Euclidean norm
+   float sumOfSquares = 0.0f;
+   for (const float &axisVelocity : desiredVelocityVector) {
+     sumOfSquares += axisVelocity * axisVelocity;
+   }
+   
+   return sqrt(sumOfSquares);
+ }
