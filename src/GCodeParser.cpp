@@ -242,225 +242,292 @@
  }
  
  bool GCodeParser::executeGCode(int code, const std::map<char, float> &params)
- {
-   switch (code)
-   {
-   case 0: // G0: Rapid move
-   case 1:
-   { // G1: Linear move
-     // Get the current position as a fallback
-     std::vector<float> currentPos = machineController->getCurrentWorkPosition();
-     
-     // Ensure lastTargetPosition is initialized and has the right size
-     if (lastTargetPosition.empty()) {
-       lastTargetPosition = currentPos;
-     } else if (lastTargetPosition.size() < currentPos.size()) {
-       lastTargetPosition.resize(currentPos.size(), 0.0f);
-     }
-     
-     // Use the last target position as the base, not the current position
-     float x = lastTargetPosition.size() > 0 ? lastTargetPosition[0] : currentPos[0];
-     float y = lastTargetPosition.size() > 1 ? lastTargetPosition[1] : currentPos[1];
-     float z = lastTargetPosition.size() > 2 ? lastTargetPosition[2] : currentPos[2];
-     float f = lastFeedrate;
- 
-     // Extract parameters with explicit updates from this command
-     auto it = params.find('X');
-     if (it != params.end())
-       x = it->second;
- 
-     it = params.find('Y');
-     if (it != params.end())
-       y = it->second;
- 
-     it = params.find('Z');
-     if (it != params.end())
-       z = it->second;
- 
-     it = params.find('F');
-     if (it != params.end())
-     {
-       f = it->second;
-       lastFeedrate = f;
-     }
- 
-     // Handle relative mode
-     if (!machineController->isAbsoluteMode())
-     {
-       // In relative mode, add offsets to current position (not last target)
-       if (params.find('X') != params.end())
-         x = currentPos[0] + params.at('X');
-       if (params.find('Y') != params.end())
-         y = currentPos[1] + params.at('Y');
-       if (params.find('Z') != params.end() && currentPos.size() > 2)
-         z = currentPos[2] + params.at('Z');
-     }
- 
-     // Update last target position
-     if (lastTargetPosition.size() > 0)
-       lastTargetPosition[0] = x;
-     if (lastTargetPosition.size() > 1)
-       lastTargetPosition[1] = y;
-     if (lastTargetPosition.size() > 2)
-       lastTargetPosition[2] = z;
- 
-     // Execute move if any coordinates specified in the command
-     if (params.find('X') != params.end() || params.find('Y') != params.end() || params.find('Z') != params.end())
-     {
-       MovementType moveType = (code == 0) ? RAPID_MOVE : LINEAR_MOVE;
-       Debug::verbose("GCodeParser", "Moving to X:" + String(x) + " Y:" + String(y) + " Z:" + String(z) + 
-                                     " at F:" + String(f) + (moveType == RAPID_MOVE ? " (rapid)" : " (linear)"));
-       return machineController->moveTo(x, y, z, f, moveType);
-     }
- 
-     return true;
-   }
- 
-   case 4:
-   { // G4: Dwell
-     // Get dwell time
-     float time = 0;
- 
-     auto it = params.find('P');
-     if (it != params.end())
-     {
-       time = it->second / 1000.0f; // P is in milliseconds
-     }
- 
-     it = params.find('S');
-     if (it != params.end())
-     {
-       time = it->second; // S is in seconds
-     }
- 
-     if (time > 0)
-     {
-       delay(time * 1000); // Convert to milliseconds
-     }
- 
-     return true;
-   }
- 
-   case 21: // G21: Set units to mm
-     return true;
- 
-   case 28:
-   { // G28: Home
-     bool homeX = false, homeY = false, homeZ = false;
-     bool homeSpecific = false;
- 
-     // Check for specific axes to home
-     auto it = params.find('X');
-     if (it != params.end())
-     {
-       homeX = true;
-       homeSpecific = true;
-     }
- 
-     it = params.find('Y');
-     if (it != params.end())
-     {
-       homeY = true;
-       homeSpecific = true;
-     }
- 
-     it = params.find('Z');
-     if (it != params.end())
-     {
-       homeZ = true;
-       homeSpecific = true;
-     }
- 
-     // If no specific axes mentioned, home all
-     if (!homeSpecific)
-     {
-       bool result = machineController->homeAll();
-       if (result) {
-         // Update last target position to match homed position
-         lastTargetPosition = machineController->getCurrentWorkPosition();
-       }
-       return result;
-     }
-     else
-     {
-       bool success = true;
-       if (homeZ) {
-         success &= machineController->homeAxis("Z");
-         if (success && lastTargetPosition.size() > 2) {
-           // Update Z in last target position
-           std::vector<float> currentPos = machineController->getCurrentWorkPosition();
-           if (currentPos.size() > 2) {
-             lastTargetPosition[2] = currentPos[2];
-           }
-         }
-       }
-       if (homeX) {
-         success &= machineController->homeAxis("X");
-         if (success && !lastTargetPosition.empty()) {
-           // Update X in last target position
-           std::vector<float> currentPos = machineController->getCurrentWorkPosition();
-           if (!currentPos.empty()) {
-             lastTargetPosition[0] = currentPos[0];
-           }
-         }
-       }
-       if (homeY) {
-         success &= machineController->homeAxis("Y");
-         if (success && lastTargetPosition.size() > 1) {
-           // Update Y in last target position
-           std::vector<float> currentPos = machineController->getCurrentWorkPosition();
-           if (currentPos.size() > 1) {
-             lastTargetPosition[1] = currentPos[1];
-           }
-         }
-       }
-       return success;
-     }
-   }
- 
-   case 90: // G90: Set to absolute positioning
-     machineController->setAbsoluteMode(true);
-     return true;
- 
-   case 91: // G91: Set to relative positioning
-     machineController->setAbsoluteMode(false);
-     return true;
+{
+  switch (code)
+  {
+  case 0: // G0: Rapid move
+  case 1: // G1: Linear move
+  {
+    // Get the current position as a fallback
+    std::vector<float> currentPos = machineController->getCurrentWorkPosition();
+    
+    // Ensure lastTargetPosition is initialized and has the right size
+    if (lastTargetPosition.empty()) {
+      lastTargetPosition = currentPos;
+    } else if (lastTargetPosition.size() < currentPos.size()) {
+      lastTargetPosition.resize(currentPos.size(), 0.0f);
+    }
+    
+    // Use the last target position as the base, not the current position
+    float x = lastTargetPosition.size() > 0 ? lastTargetPosition[0] : currentPos[0];
+    float y = lastTargetPosition.size() > 1 ? lastTargetPosition[1] : currentPos[1];
+    float z = lastTargetPosition.size() > 2 ? lastTargetPosition[2] : currentPos[2];
+    float f = lastFeedrate;
 
-   case 92:
-     { // G92: Set work position
-       std::vector<float> currentWorldPos = machineController->getCurrentWorldPosition();
-       std::vector<float> newWorkOffset = machineController->getWorkOffset();
-       
-       auto it = params.find('X');
-       if (it != params.end()) {
-         // Calculate the new offset: world_position - desired_work_position
-         newWorkOffset[0] = currentWorldPos[0] - it->second;
-       }
-       
-       it = params.find('Y');
-       if (it != params.end()) {
-         newWorkOffset[1] = currentWorldPos[1] - it->second;
-       }
-       
-       it = params.find('Z');
-       if (it != params.end()) {
-         newWorkOffset[2] = currentWorldPos[2] - it->second;
-       }
-       
-       machineController->setWorkOffset(newWorkOffset);
-       
-       // Update last target position to match new work position
-       std::vector<float> newWorkPos = machineController->getCurrentWorkPosition();
-       lastTargetPosition = newWorkPos;
-       
-       return true;
-     }
- 
-   default:
-     Debug::error("GCodeParser","Unsupported G-code: G" + String(code));
-     return false;
-   }
- }
+    // Extract parameters with explicit updates from this command
+    auto it = params.find('X');
+    if (it != params.end())
+      x = it->second;
+
+    it = params.find('Y');
+    if (it != params.end())
+      y = it->second;
+
+    it = params.find('Z');
+    if (it != params.end())
+      z = it->second;
+
+    it = params.find('F');
+    if (it != params.end())
+    {
+      f = it->second;
+      lastFeedrate = f;
+    }
+
+    // Handle relative mode
+    if (!machineController->isAbsoluteMode())
+    {
+      // In relative mode, add offsets to current position (not last target)
+      if (params.find('X') != params.end())
+        x = currentPos[0] + params.at('X');
+      if (params.find('Y') != params.end())
+        y = currentPos[1] + params.at('Y');
+      if (params.find('Z') != params.end() && currentPos.size() > 2)
+        z = currentPos[2] + params.at('Z');
+    }
+
+    // Update last target position
+    if (lastTargetPosition.size() > 0)
+      lastTargetPosition[0] = x;
+    if (lastTargetPosition.size() > 1)
+      lastTargetPosition[1] = y;
+    if (lastTargetPosition.size() > 2)
+      lastTargetPosition[2] = z;
+
+    // Execute move if any coordinates specified in the command
+    if (params.find('X') != params.end() || params.find('Y') != params.end() || params.find('Z') != params.end())
+    {
+      MovementType moveType = (code == 0) ? RAPID_MOVE : LINEAR_MOVE;
+      Debug::verbose("GCodeParser", "Moving to X:" + String(x) + " Y:" + String(y) + " Z:" + String(z) + 
+                                   " at F:" + String(f) + (moveType == RAPID_MOVE ? " (rapid)" : " (linear)"));
+      return machineController->moveTo(x, y, z, f, moveType);
+    }
+
+    return true;
+  }
+
+  case 4: // G4: Dwell
+  {
+    // Get dwell time
+    float time = 0;
+
+    auto it = params.find('P');
+    if (it != params.end())
+    {
+      time = it->second / 1000.0f; // P is in milliseconds
+    }
+
+    it = params.find('S');
+    if (it != params.end())
+    {
+      time = it->second; // S is in seconds
+    }
+
+    if (time > 0)
+    {
+      delay(time * 1000); // Convert to milliseconds
+    }
+
+    return true;
+  }
+
+  case 21: // G21: Set units to mm
+    return true;
+
+  case 28: // G28: Home
+  {
+    bool homeX = false, homeY = false, homeZ = false;
+    bool homeSpecific = false;
+
+    // Check for specific axes to home
+    auto it = params.find('X');
+    if (it != params.end())
+    {
+      homeX = true;
+      homeSpecific = true;
+    }
+
+    it = params.find('Y');
+    if (it != params.end())
+    {
+      homeY = true;
+      homeSpecific = true;
+    }
+
+    it = params.find('Z');
+    if (it != params.end())
+    {
+      homeZ = true;
+      homeSpecific = true;
+    }
+
+    // If no specific axes mentioned, home all
+    if (!homeSpecific)
+    {
+      bool result = machineController->homeAll();
+      if (result) {
+        // Update last target position to match homed position
+        lastTargetPosition = machineController->getCurrentWorkPosition();
+      }
+      return result;
+    }
+    else
+    {
+      bool success = true;
+      if (homeZ) {
+        success &= machineController->homeAxis("Z");
+        if (success && lastTargetPosition.size() > 2) {
+          // Update Z in last target position
+          std::vector<float> currentPos = machineController->getCurrentWorkPosition();
+          if (currentPos.size() > 2) {
+            lastTargetPosition[2] = currentPos[2];
+          }
+        }
+      }
+      if (homeX) {
+        success &= machineController->homeAxis("X");
+        if (success && !lastTargetPosition.empty()) {
+          // Update X in last target position
+          std::vector<float> currentPos = machineController->getCurrentWorkPosition();
+          if (!currentPos.empty()) {
+            lastTargetPosition[0] = currentPos[0];
+          }
+        }
+      }
+      if (homeY) {
+        success &= machineController->homeAxis("Y");
+        if (success && lastTargetPosition.size() > 1) {
+          // Update Y in last target position
+          std::vector<float> currentPos = machineController->getCurrentWorkPosition();
+          if (currentPos.size() > 1) {
+            lastTargetPosition[1] = currentPos[1];
+          }
+        }
+      }
+      return success;
+    }
+  }
+
+  case 53: // G53: Machine coordinate system (temporary, non-modal)
+  {
+    // G53 temporarily switches to machine coordinates for one move
+    std::vector<float> currentWorldPos = machineController->getCurrentWorldPosition();
+    
+    // Extract X, Y, Z coordinates (in machine coordinates)
+    float x = NAN, y = NAN, z = NAN, f = lastFeedrate;
+    
+    auto it = params.find('X');
+    if (it != params.end())
+      x = it->second;
+    
+    it = params.find('Y');
+    if (it != params.end())
+      y = it->second;
+    
+    it = params.find('Z');
+    if (it != params.end())
+      z = it->second;
+    
+    it = params.find('F');
+    if (it != params.end())
+    {
+      f = it->second;
+      lastFeedrate = f;
+    }
+    
+    // Only move if at least one axis is specified
+    if (!isnan(x) || !isnan(y) || !isnan(z))
+    {
+      // Create target position using current position for unspecified axes
+      std::vector<float> targetWorldPos = currentWorldPos;
+      
+      if (!isnan(x))
+        targetWorldPos[0] = x;
+      if (!isnan(y) && targetWorldPos.size() > 1)
+        targetWorldPos[1] = y;
+      if (!isnan(z) && targetWorldPos.size() > 2)
+        targetWorldPos[2] = z;
+      
+      // Default to rapid move (G0) unless a different motion type was specified
+      MovementType moveType = RAPID_MOVE;
+      
+      // Move directly in machine coordinates
+      Debug::info("GCodeParser", "G53: Moving in machine coordinates to " + 
+                  String(targetWorldPos[0]) + ", " + String(targetWorldPos[1]) + ", " + 
+                  String(targetWorldPos[2]) + " at " + String(f) + " mm/min");
+                  
+      // Update last target position to be the work position equivalent
+      std::vector<float> workPos = targetWorldPos;
+      std::vector<float> workOffset = machineController->getWorkOffset();
+      for (size_t i = 0; i < workPos.size() && i < workOffset.size(); i++) {
+        workPos[i] = targetWorldPos[i] - workOffset[i];
+      }
+      lastTargetPosition = workPos;
+      
+      bool result = machineController->moveToMachineCoordinates(targetWorldPos, f, moveType);
+      return result;
+    }
+    else
+    {
+      Debug::warning("GCodeParser", "G53 command with no coordinates specified - ignoring");
+    }
+    
+    return true;
+  }
+
+  case 90: // G90: Set to absolute positioning
+    machineController->setAbsoluteMode(true);
+    return true;
+
+  case 91: // G91: Set to relative positioning
+    machineController->setAbsoluteMode(false);
+    return true;
+
+  case 92: // G92: Set work position
+  {
+    std::vector<float> currentWorldPos = machineController->getCurrentWorldPosition();
+    std::vector<float> newWorkOffset = machineController->getWorkOffset();
+    
+    auto it = params.find('X');
+    if (it != params.end()) {
+      // Calculate the new offset: world_position - desired_work_position
+      newWorkOffset[0] = currentWorldPos[0] - it->second;
+    }
+    
+    it = params.find('Y');
+    if (it != params.end()) {
+      newWorkOffset[1] = currentWorldPos[1] - it->second;
+    }
+    
+    it = params.find('Z');
+    if (it != params.end()) {
+      newWorkOffset[2] = currentWorldPos[2] - it->second;
+    }
+    
+    machineController->setWorkOffset(newWorkOffset);
+    
+    // Update last target position to match new work position
+    std::vector<float> newWorkPos = machineController->getCurrentWorkPosition();
+    lastTargetPosition = newWorkPos;
+    
+    return true;
+  }
+
+  default:
+    Debug::error("GCodeParser","Unsupported G-code: G" + String(code));
+    return false;
+  }
+}
  
  bool GCodeParser::executeMCode(int code, const std::map<char, float> &params)
  {
@@ -485,109 +552,155 @@
  }
  
  bool GCodeParser::validate(const String &command, String &errorMessage)
- {
-   errorMessage = "";
- 
-   // Ignore empty lines and comments
-   String trimmedCmd = command;
-   trimmedCmd.trim();
- 
-   if (trimmedCmd.length() == 0 || trimmedCmd.startsWith(";"))
-   {
-     return true; // Empty lines and comments are valid
-   }
- 
-   // Remove inline comments
-   int commentIdx = trimmedCmd.indexOf(';');
-   if (commentIdx >= 0)
-   {
-     trimmedCmd = trimmedCmd.substring(0, commentIdx);
-     trimmedCmd.trim();
-   }
- 
-   // Extract G/M code
-   char codeType;
-   int code = extractCode(trimmedCmd, codeType);
- 
-   if (code < 0)
-   {
-     errorMessage = "Invalid G-code format: " + command;
-     return false;
-   }
- 
-   // Parse parameters
-   std::map<char, float> params;
-   try
-   {
-     params = parseParameters(trimmedCmd);
-   }
-   catch (const std::exception &e)
-   {
-     errorMessage = "Parameter parsing error: " + String(e.what());
-     return false;
-   }
- 
-   // Validate based on code type
-   if (codeType == 'G')
-   {
-     if (!isGCodeSupported(code))
-     {
-       errorMessage = "Unsupported G-code: G" + String(code);
-       return false;
-     }
- 
-     // Validate specific G-codes
-     switch (code)
-     {
-     case 0: // G0: Rapid move
-     case 1: // G1: Linear move
-       // At least one axis should be specified
-       if (params.find('X') == params.end() &&
-           params.find('Y') == params.end() &&
-           params.find('Z') == params.end())
-       {
-         errorMessage = "G" + String(code) + " requires at least one axis (X, Y, Z)";
-         return false;
-       }
-       break;
- 
-     case 28: // G28: Home
-       // No validation needed for G28
-       break;
- 
-     case 92: // G92: Set position
-       // At least one axis should be specified
-       if (params.find('X') == params.end() &&
-           params.find('Y') == params.end() &&
-           params.find('Z') == params.end())
-       {
-         errorMessage = "G92 requires at least one axis (X, Y, Z)";
-         return false;
-       }
-       break;
-     }
-   }
-   else if (codeType == 'M')
-   {
-     if (!isMCodeSupported(code))
-     {
-       errorMessage = "Unsupported M-code: M" + String(code);
-       return false;
-     }
-   }
-   else
-   {
-     errorMessage = "Unsupported code type: " + String(codeType);
-     return false;
-   }
- 
-   return true;
- }
+{
+  errorMessage = "";
+
+  // Ignore empty lines and comments
+  String trimmedCmd = command;
+  trimmedCmd.trim();
+
+  if (trimmedCmd.length() == 0 || trimmedCmd.startsWith(";"))
+  {
+    return true; // Empty lines and comments are valid
+  }
+
+  // Remove inline comments
+  int commentIdx = trimmedCmd.indexOf(';');
+  if (commentIdx >= 0)
+  {
+    trimmedCmd = trimmedCmd.substring(0, commentIdx);
+    trimmedCmd.trim();
+  }
+
+  // Extract G/M code
+  char codeType;
+  int code = extractCode(trimmedCmd, codeType);
+
+  if (code < 0)
+  {
+    errorMessage = "Invalid G-code format: " + command;
+    return false;
+  }
+
+  // Parse parameters
+  std::map<char, float> params;
+  try
+  {
+    params = parseParameters(trimmedCmd);
+  }
+  catch (const std::exception &e)
+  {
+    errorMessage = "Parameter parsing error: " + String(e.what());
+    return false;
+  }
+
+  // Validate based on code type
+  if (codeType == 'G')
+  {
+    if (!isGCodeSupported(code))
+    {
+      errorMessage = "Unsupported G-code: G" + String(code);
+      return false;
+    }
+
+    // Validate specific G-codes
+    switch (code)
+    {
+    case 0: // G0: Rapid move
+    case 1: // G1: Linear move
+      // At least one axis should be specified
+      if (params.find('X') == params.end() &&
+          params.find('Y') == params.end() &&
+          params.find('Z') == params.end())
+      {
+        errorMessage = "G" + String(code) + " requires at least one axis (X, Y, Z)";
+        return false;
+      }
+      break;
+
+    case 28: // G28: Home
+      // No validation needed for G28
+      break;
+      
+    case 53: // G53: Machine coordinate system
+      // G53 should be followed by a movement command or have coordinates
+      // This is a simplified check - in a complete implementation, 
+      // we'd check for a following G0/G1 command or coordinate parameters
+      if (params.find('X') == params.end() &&
+          params.find('Y') == params.end() &&
+          params.find('Z') == params.end())
+      {
+        // If no coordinates provided, look for a G0/G1 code in the command
+        bool hasMovementCode = false;
+        int gIndex = trimmedCmd.indexOf('G', 3); // Look for G after G53
+        
+        if (gIndex >= 0)
+        {
+          // Extract the G code number
+          int endIndex = gIndex + 1;
+          while (endIndex < trimmedCmd.length() && 
+                 (isdigit(trimmedCmd.charAt(endIndex)) || 
+                  trimmedCmd.charAt(endIndex) == '.'))
+          {
+            endIndex++;
+          }
+          
+          if (endIndex > gIndex + 1)
+          {
+            int followingGCode = trimmedCmd.substring(gIndex + 1, endIndex).toInt();
+            if (followingGCode == 0 || followingGCode == 1)
+            {
+              hasMovementCode = true;
+            }
+            else
+            {
+              errorMessage = "G53 can only be followed by G0 or G1";
+              return false;
+            }
+          }
+        }
+        
+        if (!hasMovementCode)
+        {
+          errorMessage = "G53 requires either coordinates or a following G0/G1 command";
+          return false;
+        }
+      }
+      break;
+
+    case 92: // G92: Set position
+      // At least one axis should be specified
+      if (params.find('X') == params.end() &&
+          params.find('Y') == params.end() &&
+          params.find('Z') == params.end())
+      {
+        errorMessage = "G92 requires at least one axis (X, Y, Z)";
+        return false;
+      }
+      break;
+    }
+  }
+  else if (codeType == 'M')
+  {
+    if (!isMCodeSupported(code))
+    {
+      errorMessage = "Unsupported M-code: M" + String(code);
+      return false;
+    }
+  }
+  else
+  {
+    errorMessage = "Unsupported code type: " + String(codeType);
+    return false;
+  }
+
+  return true;
+}
  
  bool GCodeParser::isGCodeSupported(int code) const
  {
    // List of supported G-codes
-   static const int supportedCodes[] = {0, 1, 4, 20, 21, 28, 90, 91, 92};
+   static const int supportedCodes[] = {0, 1, 4, 20, 21, 28, 53, 90, 91, 92};
    static const int numCodes = sizeof(supportedCodes) / sizeof(supportedCodes[0]);
  
    for (int i = 0; i < numCodes; i++)

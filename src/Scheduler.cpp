@@ -97,13 +97,12 @@ void Scheduler::processQueue() {
         return;
 
     if (generateSegmentsProgressive(moveQueue.front())) {
-        applyVelocityAdjustments();
+        //applyVelocityAdjustments();
     }
 }
 
 void Scheduler::applyVelocityAdjustments()
 {
-    return;
     if (segmentBuffer.empty())
         return;
 

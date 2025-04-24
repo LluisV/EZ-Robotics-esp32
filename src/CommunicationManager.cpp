@@ -1091,7 +1091,13 @@ void CommunicationManager::sendPositionTelemetry(bool force) {
           telemetryMsgBuffer += "\"Z\":" + String(velocityVector[2], 3);
       }
 
-      telemetryMsgBuffer += "}}";
+      telemetryMsgBuffer += "},";
+
+      // Add ESP32 temperature
+      float temp =  temperatureRead();
+      telemetryMsgBuffer += "\"temperature\":" + String(temp, 1);
+
+      telemetryMsgBuffer += "}";
 
       // Send the message
       sendMessage(telemetryMsgBuffer);
