@@ -352,12 +352,19 @@
    }
  
    // 5. Initialize FluidNC-style motion system
-   Debug::info("Main", "Initializing FluidNC-style motion system");
-   if (!MotionSystem::init(machineController, &motorManager, &configManager))
-   {
-     Debug::error("Main", "Failed to initialize motion system");
-     Serial.println("Failed to initialize motion system!");
-   }
+   Debug::info("Main", "Initializing motion system");
+  if (!MotionSystem::init(machineController, &motorManager, &configManager))
+  {
+    Debug::error("Main", "Failed to initialize motion system");
+    Serial.println("Failed to initialize motion system!");
+  }
+  else
+  {
+    Debug::info("Main", "Motion system initialized successfully");
+    // Explicitly register motors with the stepping system again to ensure proper setup
+    Debug::info("Main", "Explicitly registering motors");
+    MotionSystem::registerMotors(&motorManager);
+  }
  
    // 6. Initialize scheduler
    Debug::info("Main", "Creating Scheduler");

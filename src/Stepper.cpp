@@ -141,8 +141,8 @@
                  
                  // Initialize Bresenham counters
                  for (int axis = 0; axis < MAX_N_AXIS; axis++) {
-                     st.counter[axis] = st.exec_block->step_event_count >> 1;
-                 }
+                    st.counter[axis] = st.exec_block->step_event_count >> 1;
+                }
              }
              
              // Set direction bits
@@ -169,18 +169,31 @@
          }
      }
      
-     // Generate the step pulses for all axes
-     Stepping::step(st.step_outbits, st.dir_outbits);
-     
-     // Track remaining steps
-     st.step_count--;
-     if (st.step_count == 0) {
-         // Segment is complete. Discard current segment and advance index.
-         st.exec_segment = nullptr;
-         segment_buffer_tail = (segment_buffer_tail + 1) % SEGMENT_BUFFER_SIZE;
-     }
-     
-     return true; // Continue pulsing
+       //extern MotorManager* g_motorManager;
+       // TODO -> FIX THIS
+        int numMotors = 3;//(g_motorManager != nullptr) ? g_motorManager->getNumMotors() : 3;
+        
+        // Only process steps for motors that actually exist
+        for (int axis = 0; axis < numMotors && axis < MAX_N_AXIS; axis++) {
+            st.counter[axis] += st.steps[axis];
+            if (st.counter[axis] > st.exec_block->step_event_count) {
+                bitSet(st.step_outbits, axis);
+                st.counter[axis] -= st.exec_block->step_event_count;
+            }
+        }
+        
+        // Generate the step pulses for all axes
+        Stepping::step(st.step_outbits, st.dir_outbits);
+        
+        // Track remaining steps
+        st.step_count--;
+        if (st.step_count == 0) {
+            // Segment is complete. Discard current segment and advance index.
+            st.exec_segment = nullptr;
+            segment_buffer_tail = (segment_buffer_tail + 1) % SEGMENT_BUFFER_SIZE;
+        }
+        
+        return true; // Continue pulsing
  }
  
  void wake_up() {

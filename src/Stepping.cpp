@@ -65,49 +65,63 @@
  void IRAM_ATTR Stepping::step(uint8_t stepMask, uint8_t dirMask) {
      // Set direction pins if they've changed
      if (dirMask != lastDirMask) {
-         for (int axis = 0; axis < MAX_N_AXIS; axis++) {
-             bool dir = bitRead(dirMask, axis);
-             bool oldDir = bitRead(lastDirMask, axis);
-             
-             if (dir != oldDir || lastDirMask == 255) {
-                 for (int motorNum = 0; motorNum < 2; motorNum++) {
-                     for (Motor* motor : motors[axis][motorNum]) {
-                         // Set direction pin
-                         digitalWrite(motor->getConfig()->dirPin, dir ^ motor->getConfig()->invertDirection);
-                     }
-                 }
-             }
-         }
-         
-         // Wait for direction setup time if needed
-         if (directionDelayUsecs > 0) {
-             delayMicroseconds(directionDelayUsecs);
-         }
-         
-         lastDirMask = dirMask;
-     }
-     
-     // Now set step pins high
-     for (int axis = 0; axis < MAX_N_AXIS; axis++) {
-         if (bitRead(stepMask, axis)) {
-             // Update step counter
-             int increment = bitRead(dirMask, axis) ? -1 : 1;
-             axisSteps[axis] += increment;
-             
-             // Step all motors on this axis
-             for (int motorNum = 0; motorNum < 2; motorNum++) {
-                 for (Motor* motor : motors[axis][motorNum]) {
-                     // Set step pin high (or low if inverted)
-                     digitalWrite(motor->getConfig()->stepPin, !motor->getConfig()->invertStep);
-                 }
-             }
-         }
-     }
-     
-     // Wait for pulse duration
-     if (pulseUsecs > 0) {
-         delayMicroseconds(pulseUsecs);
-     }
+        for (int axis = 0; axis < MAX_N_AXIS; axis++) {
+            // FIXED: Skip if this axis has no motors
+            if (motors[axis][0].empty() && motors[axis][1].empty()) {
+                continue;
+            }
+            
+            bool dir = bitRead(dirMask, axis);
+            bool oldDir = bitRead(lastDirMask, axis);
+            
+            if (dir != oldDir || lastDirMask == 255) {
+                for (int motorNum = 0; motorNum < 2; motorNum++) {
+                    for (Motor* motor : motors[axis][motorNum]) {
+                        if (motor && motor->getConfig()) {
+                            // Set direction pin
+                            digitalWrite(motor->getConfig()->dirPin, dir ^ motor->getConfig()->invertDirection);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Wait for direction setup time if needed
+        if (directionDelayUsecs > 0) {
+            delayMicroseconds(directionDelayUsecs);
+        }
+        
+        lastDirMask = dirMask;
+    }
+    
+    // Now set step pins high
+    for (int axis = 0; axis < MAX_N_AXIS; axis++) {
+        // FIXED: Skip if this axis has no motors
+        if (motors[axis][0].empty() && motors[axis][1].empty()) {
+            continue;
+        }
+        
+        if (bitRead(stepMask, axis)) {
+            // Update step counter
+            int increment = bitRead(dirMask, axis) ? -1 : 1;
+            axisSteps[axis] += increment;
+            
+            // Step all motors on this axis
+            for (int motorNum = 0; motorNum < 2; motorNum++) {
+                for (Motor* motor : motors[axis][motorNum]) {
+                    if (motor && motor->getConfig()) {
+                        // Set step pin high (or low if inverted)
+                        digitalWrite(motor->getConfig()->stepPin, !motor->getConfig()->invertStep);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Wait for pulse duration
+    if (pulseUsecs > 0) {
+        delayMicroseconds(pulseUsecs);
+    }
  }
  
  void IRAM_ATTR Stepping::unstep() {

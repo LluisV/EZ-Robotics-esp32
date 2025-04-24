@@ -34,57 +34,44 @@
  }
  
  void registerMotors(MotorManager* motorManager) {
-     if (!motorManager) {
-         return;
-     }
-     
-     Debug::info("MotionSystem", "Registering motors with stepping system");
-     
-     // Register all motors with the stepping system
-     int numMotors = motorManager->getNumMotors();
-     for (int i = 0; i < numMotors; i++) {
-         Motor* motor = motorManager->getMotor(i);
-         if (motor) {
-             const MotorConfig* config = motor->getConfig();
-             String name = motor->getName();
-             
-             // Determine axis and motor number
-             int axis = -1;
-             int motorNum = 0;
-             
-             if (name == "X") {
-                 axis = 0;
-             } else if (name == "Y") {
-                 axis = 1;
-             } else if (name == "Z") {
-                 axis = 2;
-             } else if (name.startsWith("X2")) {
-                 axis = 0;
-                 motorNum = 1;
-             } else if (name.startsWith("Y2")) {
-                 axis = 1;
-                 motorNum = 1;
-             } else if (name.startsWith("Z2")) {
-                 axis = 2;
-                 motorNum = 1;
-             } else if (name == "A") {
-                 axis = 3;
-             } else if (name == "B") {
-                 axis = 4;
-             } else if (name == "C") {
-                 axis = 5;
-             }
-             
-             if (axis >= 0) {
-                 // Register motor with the stepping system
-                 Stepping::registerMotor(motor, axis, motorNum);
-                 Debug::info("MotionSystem", "Registered motor " + name + 
-                                            " as axis " + String(axis) + 
-                                            " motor " + String(motorNum));
-             }
-         }
-     }
- }
+    if (!motorManager) {
+        Debug::error("MotionSystem", "Cannot register motors: Motor manager is null");
+        return;
+    }
+    
+    Debug::info("MotionSystem", "Registering motors with stepping system");
+    
+    // Register all motors with the stepping system
+    int numMotors = motorManager->getNumMotors();
+    Debug::info("MotionSystem", "Found " + String(numMotors) + " motors to register");
+    
+    if (numMotors == 0) {
+        Debug::warning("MotionSystem", "No motors found to register!");
+        return;
+    }
+    
+    // Map motors to axes based on their index, not their name
+    // This assumes a standard mapping:
+    // Motor 0 → X axis (axis 0)
+    // Motor 1 → Y axis (axis 1) 
+    // Motor 2 → Z axis (axis 2)
+    for (int i = 0; i < numMotors && i < MAX_N_AXIS; i++) {
+        Motor* motor = motorManager->getMotor(i);
+        if (motor) {
+            // Map motor index directly to corresponding axis
+            int axis = i;  // Simple 1:1 mapping
+            int motorNum = 0;  // Primary motor for this axis
+            
+            // Register motor with the stepping system
+            Stepping::registerMotor(motor, axis, motorNum);
+            Debug::info("MotionSystem", "Registered motor index " + String(i) + 
+                                     " as axis " + String(axis) + 
+                                     " motor " + String(motorNum));
+        }
+    }
+    
+    Debug::info("MotionSystem", "Motor registration complete");
+}
  
  void applyConfiguration(ConfigManager* configManager) {
      if (!configManager) {

@@ -149,28 +149,30 @@
             pl_data.motion.rapidMotion = 1;
         }  
         
-        // Copy target position to float array for Planner system
-        // Always ensure we have MAX_N_AXIS positions (Planner expects this)
+        // Ensure we only use the actual number of motors we have
+        // while still maintaining MAX_N_AXIS array size for planner compatibility
         float target[MAX_N_AXIS];
         
-        // First initialize all positions with current position
+        // First initialize all positions with zeros
         for (int i = 0; i < MAX_N_AXIS; i++) {
+            target[i] = 0.0f;
+        }
+        
+        // Set current positions for motors we actually have
+        for (int i = 0; i < numMotors && i < MAX_N_AXIS; i++) {
             if (i < currentPosition.size()) {
                 target[i] = currentPosition[i];
-            } else {
-                target[i] = 0.0f;
             }
         }
         
-        // Then update the positions we want to move
-        // Only update the axes that were specified in the targetPos
-        for (size_t i = 0; i < targetPos.size() && i < MAX_N_AXIS; i++) {
+        // Then update the positions we want to move - only for motors that exist
+        for (size_t i = 0; i < targetPos.size() && i < numMotors && i < MAX_N_AXIS; i++) {
             target[i] = targetPos[i];
         }
         
         // Output debug info
         String targetDebug = "Target: ";
-        for (int i = 0; i < MAX_N_AXIS; i++) {
+        for (int i = 0; i < numMotors && i < MAX_N_AXIS; i++) {
             targetDebug += String(target[i]) + " ";
         }
         Debug::verbose("Scheduler", targetDebug);
