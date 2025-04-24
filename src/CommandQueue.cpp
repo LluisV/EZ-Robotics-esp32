@@ -39,7 +39,7 @@ bool CommandQueue::push(const String &command, CommandType type)
   Debug::verbose("CommandQueue", "Attempting to push command: " + command +
                                      " of type " + String(type));
 
-  if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE)
+  if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
     Debug::warning("CommandQueue", "Failed to acquire mutex for push");
     return false;
@@ -78,7 +78,7 @@ bool CommandQueue::push(const String &command, CommandType type)
 String CommandQueue::pop()
 {
 
-  if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE)
+  if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
     Debug::warning("CommandQueue", "Failed to acquire mutex for pop");
     return "";
@@ -116,7 +116,7 @@ String CommandQueue::peekImmediate() const
 {
   Debug::verbose("CommandQueue", "Attempting to peek immediate command");
 
-  if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE)
+  if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
     Debug::warning("CommandQueue", "Failed to acquire mutex for peek");
     return "";
@@ -137,7 +137,7 @@ String CommandQueue::peekImmediate() const
 String CommandQueue::getNextImmediate()
 {
 
-  if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE)
+  if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
     Debug::warning("CommandQueue", "Failed to acquire mutex for get next immediate");
     return "";
@@ -157,7 +157,7 @@ String CommandQueue::getNextImmediate()
 
 bool CommandQueue::isEmpty() const
 {
-  if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE)
+  if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
     Debug::warning("CommandQueue", "Failed to acquire mutex for isEmpty");
     return true;
@@ -174,7 +174,7 @@ bool CommandQueue::isFull(CommandType type) const
 {
   Debug::verbose("CommandQueue", "Checking if queue type is full: " + String(type));
 
-  if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE)
+  if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
     Debug::warning("CommandQueue", "Failed to acquire mutex for isFull");
     return true;
@@ -207,7 +207,7 @@ bool CommandQueue::isFull(CommandType type) const
 
 size_t CommandQueue::size() const
 {
-  if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE)
+  if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
     Debug::warning("CommandQueue", "Failed to acquire mutex for size");
     return 0;
@@ -229,7 +229,7 @@ void CommandQueue::clear()
 {
   Debug::info("CommandQueue", "Clearing all queues");
 
-  if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE)
+  if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
     Debug::warning("CommandQueue", "Failed to acquire mutex for clear");
     return;

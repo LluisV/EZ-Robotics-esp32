@@ -238,6 +238,9 @@ void motionTask(void *parameter)
       // Only add a delay if nothing important is happening
       if (!scheduler->hasMove() && !motorManager.isAnyMotorMoving()) {
         vTaskDelay(1); // Only delay when idle
+      } else {
+        // Allow other tasks to run, but don't delay motor pulse generation
+        taskYIELD();
       }
     }
     catch (const std::exception &e)
@@ -441,7 +444,7 @@ void setup()
   xTaskCreatePinnedToCore(
       communicationTask,   // Function to implement the task
       "communicationTask", // Name of the task
-      8192,                // Stack size in words (increased for file operations)
+      4096,                // Stack size in words (increased for file operations)
       NULL,                // Task input parameter
       1,                   // Priority of the task
       &commTaskHandle,     // Task handle
@@ -460,9 +463,9 @@ void setup()
   xTaskCreatePinnedToCore(
       motionTask,        // Function to implement the task
       "motionTask",      // Name of the task
-      4096,              // Stack size in words
+      8192,              // Stack size in words
       NULL,              // Task input parameter
-      1,                 // Priority of the task
+      3,                 // Priority of the task
       &motionTaskHandle, // Task handle
       1                  // Core where the task should run
   );

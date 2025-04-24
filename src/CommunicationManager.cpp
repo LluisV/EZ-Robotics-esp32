@@ -32,6 +32,16 @@ CommunicationManager::CommunicationManager(CommandQueue *commandQueue, CommandPr
   fileTransfer.error = false;
   fileTransfer.errorMessage = "";
 
+  // Pre-allocate buffers for telemetry
+  int estimatedMotorCount = 3; // Default to 3 motors if not available yet
+  lastReportedPosition.resize(estimatedMotorCount, 0.0f);
+  telemetryWorkBuffer.resize(estimatedMotorCount, 0.0f);
+  telemetryWorldBuffer.resize(estimatedMotorCount, 0.0f);
+  telemetryVelocityBuffer.resize(estimatedMotorCount, 0.0f);
+  
+  // Reserve space for telemetry message (avoid string reallocations)
+  telemetryMsgBuffer.reserve(512);
+
   // Clear line buffer
   resetLineBuffer();
 }
@@ -1016,11 +1026,10 @@ void CommunicationManager::resetLineBuffer()
   lineBufferIndex = 0;
 }
 
-void CommunicationManager::sendPositionTelemetry(bool force)
-{
+void CommunicationManager::sendPositionTelemetry(bool force) {
   // Skip if telemetry is disabled
   if (!telemetryEnabled)
-    return;
+      return;
 
   // Get current time
   unsigned long currentTime = millis();
@@ -1028,73 +1037,70 @@ void CommunicationManager::sendPositionTelemetry(bool force)
   // Check if it's time to send telemetry
   unsigned long telemetryInterval = 1000 / telemetryFrequency;
   if (!force && currentTime - lastTelemetryTime < telemetryInterval)
-    return;
+      return;
 
   // Ensure machine controller exists
   if (!commandProcessor)
-    return;
+      return;
   MachineController *machineController = commandProcessor->getMachineController();
   if (!machineController)
-    return;
+      return;
 
-  // Get current positions
-  std::vector<float> workPosition = machineController->getCurrentWorkPosition();
-  std::vector<float> worldPosition = machineController->getCurrentWorldPosition();
-
-  // Get current velocity (scalar and vector)
-  float currentVelocity = machineController->getCurrentDesiredVelocity();
-  std::vector<float> velocityVector = machineController->getCurrentDesiredVelocityVector();
+  // Get current positions using pre-allocated buffers
+  const std::vector<float>& workPosition = machineController->getCurrentWorkPosition();
+  const std::vector<float>& worldPosition = machineController->getCurrentWorldPosition();
+  const std::vector<float>& velocityVector = machineController->getCurrentDesiredVelocityVector();
 
   // Only send if position has changed or force is true
   if (force ||
       lastReportedPosition.empty() ||
       workPosition != lastReportedPosition)
   {
+      // Clear and reuse the string buffer
+      telemetryMsgBuffer = "[TELEMETRY]{";
+      telemetryMsgBuffer += "\"work\":{";
 
-    // Format telemetry message with JSON-like format for better parsing
-    String telemetryMsg = "[TELEMETRY]{";
-    telemetryMsg += "\"work\":{";
+      // Make sure we have at least 3 axes
+      if (workPosition.size() >= 3) {
+          telemetryMsgBuffer += "\"X\":" + String(workPosition[0], 3) + ",";
+          telemetryMsgBuffer += "\"Y\":" + String(workPosition[1], 3) + ",";
+          telemetryMsgBuffer += "\"Z\":" + String(workPosition[2], 3);
+      }
 
-    // Make sure we have at least 3 axes
-    if (workPosition.size() >= 3)
-    {
-      telemetryMsg += "\"X\":" + String(workPosition[0], 3) + ",";
-      telemetryMsg += "\"Y\":" + String(workPosition[1], 3) + ",";
-      telemetryMsg += "\"Z\":" + String(workPosition[2], 3);
-    }
+      telemetryMsgBuffer += "},\"world\":{";
 
-    telemetryMsg += "},\"world\":{";
+      if (worldPosition.size() >= 3) {
+          telemetryMsgBuffer += "\"X\":" + String(worldPosition[0], 3) + ",";
+          telemetryMsgBuffer += "\"Y\":" + String(worldPosition[1], 3) + ",";
+          telemetryMsgBuffer += "\"Z\":" + String(worldPosition[2], 3);
+      }
 
-    if (worldPosition.size() >= 3)
-    {
-      telemetryMsg += "\"X\":" + String(worldPosition[0], 3) + ",";
-      telemetryMsg += "\"Y\":" + String(worldPosition[1], 3) + ",";
-      telemetryMsg += "\"Z\":" + String(worldPosition[2], 3);
-    }
+      telemetryMsgBuffer += "},";
 
-    telemetryMsg += "},";
+      // Add scalar velocity information
+      float currentVelocity = machineController->getCurrentDesiredVelocity();
+      telemetryMsgBuffer += "\"velocity\":" + String(currentVelocity, 3) + ",";
 
-    // Add scalar velocity information
-    telemetryMsg += "\"velocity\":" + String(currentVelocity, 3) + ",";
+      // Add velocity vector
+      telemetryMsgBuffer += "\"velocityVector\":{";
 
-    // Add velocity vector
-    telemetryMsg += "\"velocityVector\":{";
+      // Make sure we have at least 3 axes
+      if (velocityVector.size() >= 3) {
+          telemetryMsgBuffer += "\"X\":" + String(velocityVector[0], 3) + ",";
+          telemetryMsgBuffer += "\"Y\":" + String(velocityVector[1], 3) + ",";
+          telemetryMsgBuffer += "\"Z\":" + String(velocityVector[2], 3);
+      }
 
-    // Make sure we have at least 3 axes
-    if (velocityVector.size() >= 3)
-    {
-      telemetryMsg += "\"X\":" + String(velocityVector[0], 3) + ",";
-      telemetryMsg += "\"Y\":" + String(velocityVector[1], 3) + ",";
-      telemetryMsg += "\"Z\":" + String(velocityVector[2], 3);
-    }
+      telemetryMsgBuffer += "}}";
 
-    telemetryMsg += "}}";
+      // Send the message
+      sendMessage(telemetryMsgBuffer);
 
-    // Send the message
-    sendMessage(telemetryMsg);
-
-    // Update tracking variables
-    lastReportedPosition = workPosition;
-    lastTelemetryTime = currentTime;
+      // Update tracking variables - copy data to avoid new allocations
+      if (lastReportedPosition.size() != workPosition.size()) {
+          lastReportedPosition.resize(workPosition.size());
+      }
+      std::copy(workPosition.begin(), workPosition.end(), lastReportedPosition.begin());
+      lastTelemetryTime = currentTime;
   }
 }

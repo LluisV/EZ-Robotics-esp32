@@ -418,6 +418,26 @@ bool Scheduler::executeSegment(const Segment &segment)
         return false;
     }
 
+    // Print segment execution information in a single line
+    std::vector<float> velocities_mm_min(numMotors);
+    String segmentInfo = "SEG d=" + String(segment.distance, 2) + "mm | ";
+    
+    for (int i = 0; i < numMotors; i++) {
+        Motor *motor = motorManager->getMotor(i);
+        if (!motor) continue;
+        
+        // Convert to mm/min for human readability
+        float stepsPerUnit = abs(motor->unitsToSteps(1));
+        float velocity_mm_min = (stepsPerUnit > 0.0f) ? (segment.adjustedVelocities[i] / stepsPerUnit) * 60.0f : 0.0f;
+        velocities_mm_min[i] = velocity_mm_min;
+        
+        // Add position and velocity for this axis
+        segmentInfo += motor->getName() + ":[" + String(segment.jointPositions[i], 2) + "mm, " 
+                    + String(velocity_mm_min, 0) + "mm/min] ";
+    }
+    
+    Debug::info("Scheduler", segmentInfo);
+
     // Configure and start each motor
     for (int i = 0; i < numMotors; i++)
     {
@@ -441,29 +461,12 @@ bool Scheduler::executeSegment(const Segment &segment)
         // Start the move
         motor->moveTo(targetSteps, speedInHz);
 
-        // Conversión de adjustedVelocities (steps/s) a mm/min
-        std::vector<float> velocities_mm_min(numMotors);
-
-        for (int j = 0; j < numMotors; j++)
-        {
-            Motor *motor = motorManager->getMotor(j);
-            if (!motor) continue;
-
-            float stepsPerUnit = abs(motor->unitsToSteps(1)); // steps/mm
-            if (stepsPerUnit == 0.0f) continue;
-
-            // Convertir de steps/s a mm/s, luego de mm/s a mm/min
-            float velocity_mm_min = (segment.adjustedVelocities[j] / stepsPerUnit) * 60.0f;
-            velocities_mm_min[j] = velocity_mm_min;
-        }
-
-        // Ahora puedes enviar las velocidades ajustadas en mm/min
-        machineController->setCurrentDesiredVelocityVector(velocities_mm_min);
-
-        
         // Update current steps
         currentSteps[i] = targetSteps;
     }
+
+    // Send the adjusted velocities to the machine controller
+    machineController->setCurrentDesiredVelocityVector(velocities_mm_min);
 
     return true;
 }
