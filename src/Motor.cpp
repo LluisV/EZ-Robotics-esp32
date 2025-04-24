@@ -37,10 +37,11 @@ bool Motor::initialize(FastAccelStepperEngine *engine)
     return false;
   }
 
-  stepper->setDirectionPin(config->dirPin);
+  stepper->setDirectionPin(config->dirPin, true, MIN_DIR_DELAY_US);
   stepper->setAcceleration(1410065408);
   stepper->setLinearAcceleration(0);
   stepper->setSpeedInHz(config->maxSpeed);
+  stepper->setForwardPlanningTimeInMs(50);
 
   // Set initial position to home position
   long homeSteps = unitsToSteps(config->homePosition);

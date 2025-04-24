@@ -42,7 +42,9 @@ bool MotorManager::initialize(ConfigManager *configManager)
 
   // Initialize the engine
   Debug::info("MotorManager", "Initializing stepper engine");
-  engine.init();
+  #if defined(ESP32)
+  engine.init(1);
+  #endif
 
   // Create motors based on configuration
   int numMotors = configManager->getNumMotors();

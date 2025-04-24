@@ -138,8 +138,16 @@ void communicationTask(void *parameter)
 // In main.cpp, modify the motion task to minimize delays:
 void motionTask(void *parameter)
 {
+  btStop();
+
+  // Use higher CPU frequency during motion
+  setCpuFrequencyMhz(240);
+
+  // Pin critical tasks to specific cores
+  esp_task_wdt_delete(NULL); // Disable watchdog for this task
+
   Debug::info("MotionTask", "Task started on Core " + String(xPortGetCoreID()));
-  
+
   String pendingCommand = "";
   unsigned long lastCommandTime = 0;
   const unsigned long COMMAND_INTERVAL = 10; // Process commands every 10ms
@@ -149,29 +157,35 @@ void motionTask(void *parameter)
     try
     {
       // Process segments from the scheduler - HIGHEST PRIORITY
-      if (scheduler) { 
+      if (scheduler)
+      {
         // Execute the next movement segment
         scheduler->executeNextSegment();
       }
+      // Update motor states - this should be called frequently
+      motorManager.update();
 
-      // Process commands from queue less frequently
-      unsigned long currentTime = millis();
-      if (currentTime - lastCommandTime >= COMMAND_INTERVAL) {
-        lastCommandTime = currentTime;
-        
-        // Process commands from queue
-        if (machineController && gCodeParser && commandQueue && !commandQueue->isEmpty())
+      if (!motorManager.isAnyMotorMoving() || millis() - lastCommandTime >= COMMAND_INTERVAL)
+      {
+        // Process commands from queue less frequently
+        unsigned long currentTime = millis();
+        if (currentTime - lastCommandTime >= COMMAND_INTERVAL)
         {
-          // First check for immediate commands
-          String immediateCmd = commandQueue->getNextImmediate();
-          if (immediateCmd.length() > 0)
-          {
-            Debug::info("MotionTask", "Processing immediate command: " + immediateCmd);
+          lastCommandTime = currentTime;
 
-            // Process immediate command
-            GCodeParseResult parseResult = gCodeParser->parse(immediateCmd);
-            switch (parseResult)
+          // Process commands from queue
+          if (machineController && gCodeParser && commandQueue && !commandQueue->isEmpty())
+          {
+            // First check for immediate commands
+            String immediateCmd = commandQueue->getNextImmediate();
+            if (immediateCmd.length() > 0)
             {
+              Debug::info("MotionTask", "Processing immediate command: " + immediateCmd);
+
+              // Process immediate command
+              GCodeParseResult parseResult = gCodeParser->parse(immediateCmd);
+              switch (parseResult)
+              {
               case GCodeParseResult::PARSE_ERROR:
                 Debug::error("MotionTask", "Failed to execute immediate command: " + immediateCmd);
 
@@ -196,20 +210,20 @@ void motionTask(void *parameter)
               case GCodeParseResult::SUCCESS:
                 // Command successfully processed
                 break;
+              }
             }
-          }
-          // Process regular commands
-          else
-          {
-            if(commandQueue->isEmpty())
-              continue;
-            String command = commandQueue->pop();
-            Debug::verbose("MotionTask", "Processing command from queue: " + command);
-
-            // Parse as G-code
-            GCodeParseResult parseResult = gCodeParser->parse(command);
-            switch (parseResult)
+            // Process regular commands
+            else
             {
+              if (commandQueue->isEmpty())
+                continue;
+              String command = commandQueue->pop();
+              Debug::verbose("MotionTask", "Processing command from queue: " + command);
+
+              // Parse as G-code
+              GCodeParseResult parseResult = gCodeParser->parse(command);
+              switch (parseResult)
+              {
               case GCodeParseResult::PARSE_ERROR:
                 Debug::error("MotionTask", "Failed to execute command: " + command);
 
@@ -227,20 +241,20 @@ void motionTask(void *parameter)
               case GCodeParseResult::SUCCESS:
                 // Command successfully processed
                 break;
+              }
             }
           }
         }
       }
 
-      // Update motor states - this should be called frequently
-      motorManager.update();
-
-      // Only add a delay if nothing important is happening
-      if (!scheduler->hasMove() && !motorManager.isAnyMotorMoving()) {
-        vTaskDelay(1); // Only delay when idle
-      } else {
-        // Allow other tasks to run, but don't delay motor pulse generation
+      // Yield without delay during motion
+      if (motorManager.isAnyMotorMoving())
+      {
         taskYIELD();
+      }
+      else
+      {
+        vTaskDelay(1);
       }
     }
     catch (const std::exception &e)
