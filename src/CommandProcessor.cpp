@@ -191,7 +191,8 @@ String CommandProcessor::processInfoCommand(const String &command)
         configStr += "    Max Position: " + String(motorConfig->maxPosition) + " mm\n";
         configStr += "    Endstop Position: " + String(motorConfig->endstopPosition) + " mm\n";
         configStr += "    Home Position: " + String(motorConfig->homePosition) + " mm\n";
-        configStr += "    Position Inverted: " + String(motorConfig->invertPosition ? "Yes" : "No") + "\n";
+        configStr += "    Direction Inverted: " + String(motorConfig->invertDirection ? "Yes" : "No") + "\n";
+        configStr += "    Step Inverted: " + String(motorConfig->invertStep ? "Yes" : "No") + "\n";
         configStr += "    Home Speed: " + String(motorConfig->homeSpeed) + " steps/sec\n";
         configStr += "    Homing Direction: " + String(motorConfig->homingDirection > 0 ? "Positive" : "Negative") + "\n";
         configStr += "    Backoff Distance: " + String(motorConfig->backoffDistance) + " mm\n\n";

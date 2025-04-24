@@ -307,9 +307,9 @@
      // Execute move if any coordinates specified in the command
      if (params.find('X') != params.end() || params.find('Y') != params.end() || params.find('Z') != params.end())
      {
-       MovementType moveType = (code == 0) ? RAPID_MOVE : LINEAR_MOVE;
+       MovementType moveType = (code == 0) ? RAPID_MOTION : LINEAR_MOTION;
        Debug::verbose("GCodeParser", "Moving to X:" + String(x) + " Y:" + String(y) + " Z:" + String(z) + 
-                                     " at F:" + String(f) + (moveType == RAPID_MOVE ? " (rapid)" : " (linear)"));
+                                     " at F:" + String(f) + (moveType == RAPID_MOTION ? " (rapid)" : " (linear)"));
        return machineController->moveTo(x, y, z, f, moveType);
      }
  

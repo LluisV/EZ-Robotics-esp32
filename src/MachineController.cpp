@@ -155,7 +155,7 @@
    // Use segmented motion planner if available
    if (motionPlanner) {
     Debug::verbose("MachineController", "Move sent to the motion planner");
-    if (movementType == RAPID_MOVE) {
+    if (movementType == RAPID_MOTION) {
       return motionPlanner->addRapidMove(targetMotorPos);
     } else {
      return motionPlanner->addLinearMove(targetMotorPos, feedrate);
@@ -314,7 +314,7 @@
          float yPos = isnan(y) ? currentPos[1] : y;
          float zPos = isnan(z) ? currentPos[2] : z;
  
-         return moveTo(xPos, yPos, zPos, currentFeedrate, RAPID_MOVE);
+         return moveTo(xPos, yPos, zPos, currentFeedrate, RAPID_MOTION);
        }
      }
      else if (value == 1)
@@ -343,7 +343,7 @@
          float yPos = isnan(y) ? currentPos[1] : y;
          float zPos = isnan(z) ? currentPos[2] : z;
  
-         return moveTo(xPos, yPos, zPos, currentFeedrate, LINEAR_MOVE);
+         return moveTo(xPos, yPos, zPos, currentFeedrate, LINEAR_MOTION);
        }
      }
      else if (value == 28)
