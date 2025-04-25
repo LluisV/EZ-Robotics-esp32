@@ -21,11 +21,11 @@ bool FileManager::initialize(bool formatIfNeeded)
   // First try mounting SPIFFS normally
   if (!SPIFFS.begin(false))
   {
-    Debug::warning("FileManager", "SPIFFS mount failed");
+    //Debug::warning("FileManager", "SPIFFS mount failed");
 
     if (formatIfNeeded)
     {
-      Debug::warning("FileManager", "Trying to format SPIFFS");
+      //Debug::warning("FileManager", "Trying to format SPIFFS");
 
       if (SPIFFS.format())
       {
@@ -361,7 +361,7 @@ size_t FileManager::getTotalSpace()
 
 bool FileManager::formatFileSystem()
 {
-  Debug::warning("FileManager", "Formatting file system");
+  //Debug::warning("FileManager", "Formatting file system");
 
   bool result = SPIFFS.format();
 

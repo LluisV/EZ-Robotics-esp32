@@ -31,7 +31,7 @@ bool ConfigManager::init()
   // First try formatting SPIFFS explicitly
   if (!SPIFFS.begin(false))
   {
-    Debug::warning("ConfigManager", "SPIFFS mount failed, trying to format...");
+    //Debug::warning("ConfigManager", "SPIFFS mount failed, trying to format...");
 
     if (SPIFFS.format())
     {
@@ -71,7 +71,7 @@ bool ConfigManager::loadConfig()
   // Check if config file exists
   if (!SPIFFS.exists(CONFIG_FILE))
   {
-    Debug::warning("ConfigManager", "Config file not found");
+    //Debug::warning("ConfigManager", "Config file not found");
     return false;
   }
 
@@ -120,7 +120,7 @@ bool ConfigManager::loadConfig()
     }
     else
     {
-      Debug::warning("ConfigManager", "Failed to parse motor configuration for " + motorJson["name"].as<String>());
+      //Debug::warning("ConfigManager", "Failed to parse motor configuration for " + motorJson["name"].as<String>());
       // Continue parsing other motors
     }
   }

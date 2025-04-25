@@ -182,7 +182,7 @@
                  break;
  
                case GCodeParseResult::QUEUE_FULL:
-                 Debug::warning("MotionTask", "Scheduler queue full for immediate command, requeueing: " + immediateCmd);
+                 //Debug::warning("MotionTask", "Scheduler queue full for immediate command, requeueing: " + immediateCmd);
                  if (immediateCmd.startsWith("M112") || immediateCmd.startsWith("STOP"))
                  {
                    machineController->emergencyStop();
@@ -204,7 +204,7 @@
              if(commandQueue->isEmpty())
                continue;
              String command = commandQueue->pop();
-             Debug::verbose("MotionTask", "Processing command from queue: " + command);
+             //Debug::verbose("MotionTask", "Processing command from queue: " + command);
  
              // Parse as G-code
              GCodeParseResult parseResult = gCodeParser->parse(command);
@@ -215,12 +215,12 @@
  
                  if (jobManager && jobManager->isJobRunning())
                  {
-                   Debug::warning("MotionTask", "Command failed during job execution");
+                   //Debug::warning("MotionTask", "Command failed during job execution");
                  }
                  break;
  
                case GCodeParseResult::QUEUE_FULL:
-                 Debug::warning("MotionTask", "Scheduler queue full, requeueing command: " + command);
+                 //Debug::warning("MotionTask", "Scheduler queue full, requeueing command: " + command);
                  commandQueue->push(command, IMMEDIATE);
                  break;
  
@@ -284,7 +284,7 @@
      }
      else
      {
-       Debug::warning("Main", "ConfigManager init failed on attempt " + String(configInitAttempts));
+       //Debug::warning("Main", "ConfigManager init failed on attempt " + String(configInitAttempts));
        delay(500);
      }
    }
@@ -298,7 +298,7 @@
  
    if (!configLoaded)
    {
-     Debug::warning("Main", "Failed to load configuration, using defaults");
+     //Debug::warning("Main", "Failed to load configuration, using defaults");
      Serial.println("Failed to load configuration. Using defaults.");
      configManager.useDefaultConfig();
    }

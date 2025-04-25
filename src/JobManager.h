@@ -216,6 +216,35 @@ private:
    * @return True if successful, false otherwise
    */
   bool saveJobState();
+
+  /**
+   * @brief Read a line from a file directly into a buffer without using String
+   * @param file File reference
+   * @param buffer Buffer to store the line
+   * @param bufferSize Size of the buffer
+   * @return True if a line was read, false if EOF
+   */
+  bool readLineToBuffer(File &file, char *buffer, size_t bufferSize);
+  
+  /**
+   * @brief Check if a line is empty (contains only whitespace)
+   * @param line Null-terminated C-string to check
+   * @return True if line is empty or contains only whitespace
+   */
+  bool isEmptyLine(const char *line);
+  
+  /**
+   * @brief Check if a line is a comment line (begins with ';')
+   * @param line Null-terminated C-string to check
+   * @return True if line is a comment line
+   */
+  bool isCommentLine(const char *line);
+  
+  /**
+   * @brief Process a G-code line in-place (remove comments and trim whitespace)
+   * @param line Null-terminated C-string to process
+   */
+  void processLineInPlace(char *line);
 };
 
 #endif // JOB_MANAGER_H

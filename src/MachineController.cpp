@@ -154,7 +154,7 @@
  
    // Use segmented motion planner if available
    if (motionPlanner) {
-    Debug::verbose("MachineController", "Move sent to the motion planner");
+    //Debug::verbose("MachineController", "Move sent to the motion planner");
     if (movementType == RAPID_MOVE) {
       return motionPlanner->addRapidMove(targetMotorPos);
     } else {
@@ -301,7 +301,7 @@
  
    if (!motorConfig)
    {
-     Debug::warning("MachineController", "No config found for motor " + motorName + " during limit validation");
+     //Debug::warning("MachineController", "No config found for motor " + motorName + " during limit validation");
      return true; // Allow movement if we can't find config (safer than blocking)
    }
  
@@ -314,8 +314,7 @@
  
    if (position < minLimit)
    {
-     Debug::warning("MachineController", motorName + " position " + String(position) +
-                                             " below minimum limit of " + String(minLimit));
+     //Debug::warning("MachineController", motorName + " position " + String(position) +" below minimum limit of " + String(minLimit));
      withinLimits = false;
  
      if (clampToLimits)
@@ -326,8 +325,7 @@
    }
    else if (position > maxLimit)
    {
-     Debug::warning("MachineController", motorName + " position " + String(position) +
-                                             " exceeds maximum limit of " + String(maxLimit));
+     //Debug::warning("MachineController", motorName + " position " + String(position) +" exceeds maximum limit of " + String(maxLimit));
      withinLimits = false;
  
      if (clampToLimits)
@@ -358,14 +356,12 @@
            // Clamp to machine limits
            if (constrainedPos[i] < config->minPosition)
            {
-             Debug::warning("MachineController", "Clamping " + motor->getName() +
-                                                     " position to minimum limit (" + String(config->minPosition) + ")");
+             //Debug::warning("MachineController", "Clamping " + motor->getName() +" position to minimum limit (" + String(config->minPosition) + ")");
              constrainedPos[i] = config->minPosition;
            }
            else if (constrainedPos[i] > config->maxPosition)
            {
-             Debug::warning("MachineController", "Clamping " + motor->getName() +
-                                                     " position to maximum limit (" + String(config->maxPosition) + ")");
+             //Debug::warning("MachineController", "Clamping " + motor->getName() +" position to maximum limit (" + String(config->maxPosition) + ")");
              constrainedPos[i] = config->maxPosition;
            }
          }
@@ -507,7 +503,7 @@ bool MachineController::moveToMachineCoordinates(const std::vector<float> &posit
 
   // Use segmented motion planner if available
   if (motionPlanner) {
-    Debug::verbose("MachineController", "Machine coordinate move sent to the motion planner");
+    //Debug::verbose("MachineController", "Machine coordinate move sent to the motion planner");
     if (movementType == RAPID_MOVE) {
       return motionPlanner->addRapidMove(targetMotorPos);
     } else {

@@ -114,7 +114,7 @@ bool CommunicationManager::update()
       else
       {
         // Line too long, discard and reset
-        Debug::warning("CommunicationManager", "Line too long, discarding");
+        //Debug::warning("CommunicationManager", "Line too long, discarding");
         sendMessage("Error: Command too long (max " + String(MAX_LINE_LENGTH) + " chars)");
         resetLineBuffer();
       }
@@ -152,7 +152,7 @@ bool CommunicationManager::update()
 void CommunicationManager::sendMessage(const String &message)
 {
   Serial.println(message);
-  Debug::verbose("CommunicationManager", "Sent message: " + message);
+  //Debug::verbose("CommunicationManager", "Sent message: " + message);
 }
 
 void CommunicationManager::sendStatusUpdate(bool detailed)
@@ -247,7 +247,7 @@ bool CommunicationManager::startFileReceive(const String &filename, size_t fileS
   if (SPIFFS.exists(filename))
   {
     // For now, we'll overwrite the file
-    Debug::warning("CommunicationManager", "File already exists, overwriting: " + filename);
+    //Debug::warning("CommunicationManager", "File already exists, overwriting: " + filename);
   }
 
   // Initialize file transfer state
@@ -322,7 +322,7 @@ void CommunicationManager::cancelFileTransfer(const String &reason)
     return;
   }
 
-  Debug::warning("CommunicationManager", "File transfer cancelled: " + reason);
+  //Debug::warning("CommunicationManager", "File transfer cancelled: " + reason);
 
   // Close file if open
   if (fileTransfer.mode == TRANSFER_RECEIVING)
@@ -358,7 +358,7 @@ void CommunicationManager::processLine(const String &line)
     return;
   }
 
-  Debug::verbose("CommunicationManager", "Processing line: " + line);
+  //Debug::verbose("CommunicationManager", "Processing line: " + line);
 
   // Check for special command prefixes
   if (line.startsWith("!") || line.startsWith("?"))
@@ -393,7 +393,7 @@ void CommunicationManager::processLine(const String &line)
 
   // Otherwise, queue as a regular G-code command
   commandQueue->push(line, MOTION);
-  Debug::verbose("CommunicationManager", "Queued G-code command: " + line);
+  //Debug::verbose("CommunicationManager", "Queued G-code command: " + line);
 }
 
 bool CommunicationManager::processSpecialCommand(const String &command)
@@ -682,7 +682,7 @@ bool CommunicationManager::processFileCommand(const String &command)
     }
     else
     {
-      Debug::warning("CommunicationManager", "G-code validator not available. Proceeding without validation.");
+      //Debug::warning("CommunicationManager", "G-code validator not available. Proceeding without validation.");
     }
 
     // Add debug information to understand current state
@@ -692,7 +692,7 @@ bool CommunicationManager::processFileCommand(const String &command)
     // Forcibly reset job state if needed
     if (!jobManager->canStartNewJob())
     {
-      Debug::warning("CommunicationManager", "Forcing job manager reset before starting new job");
+      //Debug::warning("CommunicationManager", "Forcing job manager reset before starting new job");
       jobManager->stopJob(); // Force reset the job state
     }
 
@@ -882,9 +882,7 @@ void CommunicationManager::finalizeFileTransfer()
 
   if (actualSize != fileTransfer.fileSize)
   {
-    Debug::warning("CommunicationManager",
-                   "File size mismatch - Expected: " + String(fileTransfer.fileSize) +
-                       ", Actual: " + String(actualSize));
+    //Debug::warning("CommunicationManager","File size mismatch - Expected: " + String(fileTransfer.fileSize) +", Actual: " + String(actualSize));
 
     // If the file is smaller than expected, we're missing data
     if (actualSize < fileTransfer.fileSize)
@@ -1016,7 +1014,7 @@ bool CommunicationManager::checkFileTransferTimeout()
   // Check if timeout has occurred
   if (millis() - fileTransfer.lastUpdate > FILE_TRANSFER_TIMEOUT)
   {
-    Debug::warning("CommunicationManager", "File transfer timeout");
+    //Debug::warning("CommunicationManager", "File transfer timeout");
     return true;
   }
 
@@ -1070,64 +1068,72 @@ void CommunicationManager::sendPositionTelemetry(bool force)
       lastReportedPosition.empty() ||
       workPosition != lastReportedPosition)
   {
-    // Clear and reuse the string buffer
-    telemetryMsgBuffer = "[TELEMETRY]{";
-    telemetryMsgBuffer += "\"work\":{";
-
+    // Use ArduinoJson to create the telemetry message
+    StaticJsonDocument<512> doc; // Size optimized for the telemetry message
+    
+    // Add work coordinates
+    JsonObject work = doc.createNestedObject("work");
     // Make sure we have at least 3 axes
     if (workPosition.size() >= 3)
     {
-      telemetryMsgBuffer += "\"X\":" + String(workPosition[0], 3) + ",";
-      telemetryMsgBuffer += "\"Y\":" + String(workPosition[1], 3) + ",";
-      telemetryMsgBuffer += "\"Z\":" + String(workPosition[2], 3);
+      work["X"] = round(workPosition[0] * 1000) / 1000.0f; // Round to 3 decimal places
+      work["Y"] = round(workPosition[1] * 1000) / 1000.0f;
+      work["Z"] = round(workPosition[2] * 1000) / 1000.0f;
     }
-
-    telemetryMsgBuffer += "},\"world\":{";
-
+    
+    // Add world coordinates
+    JsonObject world = doc.createNestedObject("world");
     if (worldPosition.size() >= 3)
     {
-      telemetryMsgBuffer += "\"X\":" + String(worldPosition[0], 3) + ",";
-      telemetryMsgBuffer += "\"Y\":" + String(worldPosition[1], 3) + ",";
-      telemetryMsgBuffer += "\"Z\":" + String(worldPosition[2], 3);
+      world["X"] = round(worldPosition[0] * 1000) / 1000.0f;
+      world["Y"] = round(worldPosition[1] * 1000) / 1000.0f;
+      world["Z"] = round(worldPosition[2] * 1000) / 1000.0f;
     }
-
-    telemetryMsgBuffer += "},";
-
+    
     // Add scalar velocity information
     float currentVelocity = machineController->getCurrentDesiredVelocity();
-    telemetryMsgBuffer += "\"velocity\":" + String(currentVelocity, 3) + ",";
-
+    doc["velocity"] = round(currentVelocity * 1000) / 1000.0f;
+    
     // Add velocity vector
-    telemetryMsgBuffer += "\"velocityVector\":{";
-
+    JsonObject velocityObj = doc.createNestedObject("velocityVector");
     // Make sure we have at least 3 axes
     if (velocityVector.size() >= 3)
     {
-      telemetryMsgBuffer += "\"X\":" + String(velocityVector[0], 3) + ",";
-      telemetryMsgBuffer += "\"Y\":" + String(velocityVector[1], 3) + ",";
-      telemetryMsgBuffer += "\"Z\":" + String(velocityVector[2], 3);
+      velocityObj["X"] = round(velocityVector[0] * 1000) / 1000.0f;
+      velocityObj["Y"] = round(velocityVector[1] * 1000) / 1000.0f;
+      velocityObj["Z"] = round(velocityVector[2] * 1000) / 1000.0f;
     }
-
-    telemetryMsgBuffer += "},";
-
+    
     // Add ESP32 temperature
     float temp = temperatureRead();
-    telemetryMsgBuffer += "\"temperature\":" + String(temp, 1) + ",";
-
-    // With this more accurate version:
+    doc["temperature"] = round(temp * 10) / 10.0f; // Round to 1 decimal place
+    
+    // Add CPU usage
     if (cpuMonitor) {
-      telemetryMsgBuffer += "\"cpuUsage\":" + String(cpuMonitor->getTotalUsage(), 1) + ",";
-      telemetryMsgBuffer += "\"cpuCore0\":" + String(cpuMonitor->getCore0Usage(), 1) + ",";
-      telemetryMsgBuffer += "\"cpuCore1\":" + String(cpuMonitor->getCore1Usage(), 1) + ",";
+      doc["cpuUsage"] = round(cpuMonitor->getTotalUsage() * 10) / 10.0f;
+      doc["cpuCore0"] = round(cpuMonitor->getCore0Usage() * 10) / 10.0f;
+      doc["cpuCore1"] = round(cpuMonitor->getCore1Usage() * 10) / 10.0f;
     } else {
-      telemetryMsgBuffer += "\"cpuUsage\":0.0,";
+      doc["cpuUsage"] = 0.0f;
+      doc["cpuCore0"] = 0.0f;
+      doc["cpuCore1"] = 0.0f;
     }
-
+    
     // Add memory usage percentage
-    telemetryMsgBuffer += "\"memoryUsage\":" + String(memoryUsagePercent, 1);
-
-    telemetryMsgBuffer += "}";
-
+    doc["memoryUsage"] = round(memoryUsagePercent * 10) / 10.0f;
+    
+    // Serialize to a pre-allocated buffer (reuse telemetryMsgBuffer)
+    telemetryMsgBuffer = "[TELEMETRY]";
+    
+    // We need to keep separate buffers to avoid mixing the JSON processing with our tag
+    char jsonBuffer[384]; // Adjust size as needed
+    
+    // Serialize the JSON to our buffer
+    serializeJson(doc, jsonBuffer, sizeof(jsonBuffer));
+    
+    // Append JSON to telemetry message
+    telemetryMsgBuffer += jsonBuffer;
+    
     // Send the message
     sendMessage(telemetryMsgBuffer);
 

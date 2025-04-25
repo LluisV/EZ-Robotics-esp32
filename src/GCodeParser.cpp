@@ -22,7 +22,7 @@
  
  GCodeParseResult GCodeParser::parse(const String &command)
  {
-   Debug::verbose("GCodeParser", "Parsing command: " + command);
+   //Debug::verbose("GCodeParser", "Parsing command: " + command);
  
    // Ignore empty lines and comments
    String trimmedCmd = command;
@@ -30,7 +30,7 @@
  
    if (trimmedCmd.length() == 0 || trimmedCmd.startsWith(";"))
    {
-     Debug::verbose("GCodeParser", "Ignoring empty line or comment");
+     //Debug::verbose("GCodeParser", "Ignoring empty line or comment");
      return GCodeParseResult::SUCCESS;
    }
  
@@ -40,7 +40,7 @@
    {
      trimmedCmd = trimmedCmd.substring(0, commentIdx);
      trimmedCmd.trim();
-     Debug::verbose("GCodeParser", "Removed inline comment. Trimmed command: " + trimmedCmd);
+     //Debug::verbose("GCodeParser", "Removed inline comment. Trimmed command: " + trimmedCmd);
    }
  
    // Validate the command first
@@ -54,7 +54,7 @@
    // Check if motion planner is full
    if (machineController->getMotionPlanner()->isFull())
    {
-     Debug::warning("GCodeParser", "Motion planner queue is full");
+     //Debug::warning("GCodeParser", "Motion planner queue is full");
      return GCodeParseResult::QUEUE_FULL;
    }
  
@@ -62,7 +62,7 @@
    char codeType;
    int code = extractCode(trimmedCmd, codeType);
  
-   Debug::verbose("GCodeParser", "Extracted code: " + String(codeType) + String(code));
+   //Debug::verbose("GCodeParser", "Extracted code: " + String(codeType) + String(code));
  
    // Parse parameters
    std::map<char, float> params;
@@ -77,10 +77,10 @@
    }
  
    // Log parsed parameters
-   Debug::verbose("GCodeParser", "Parsed parameters count: " + String(params.size()));
+   //Debug::verbose("GCodeParser", "Parsed parameters count: " + String(params.size()));
    for (const auto &param : params)
    {
-     Debug::verbose("GCodeParser", "Parameter " + String(param.first) + ": " + String(param.second));
+     //Debug::verbose("GCodeParser", "Parameter " + String(param.first) + ": " + String(param.second));
      lastParams[param.first] = param.second;
    }
  
@@ -90,12 +90,12 @@
    {
      if (codeType == 'G')
      {
-       Debug::verbose("GCodeParser", "Executing G-code: G" + String(code));
+       //Debug::verbose("GCodeParser", "Executing G-code: G" + String(code));
        result = executeGCode(code, params);
      }
      else if (codeType == 'M')
      {
-       Debug::verbose("GCodeParser", "Executing M-code: M" + String(code));
+       //Debug::verbose("GCodeParser", "Executing M-code: M" + String(code));
        result = executeMCode(code, params);
      }
      else
@@ -117,12 +117,12 @@
  
    if (!result)
    {
-     Debug::warning("GCodeParser", "Failed to execute command: " + command);
+     //Debug::warning("GCodeParser", "Failed to execute command: " + command);
      return GCodeParseResult::PARSE_ERROR;
    }
    else
    {
-     Debug::verbose("GCodeParser", "Command executed successfully");
+     //Debug::verbose("GCodeParser", "Command executed successfully");
    }
  
    if (result)
@@ -158,7 +158,7 @@
  {
    std::map<char, float> params;
  
-   Debug::verbose("GCodeParser", "Parsing parameters from: " + command);
+   //Debug::verbose("GCodeParser", "Parsing parameters from: " + command);
  
    for (int i = 0; i < command.length(); i++)
    {
@@ -192,7 +192,7 @@
        // Store the parameter (uppercase for consistency)
        params[toupper(c)] = value;
  
-       Debug::verbose("GCodeParser", "Parsed parameter: " + String(toupper(c)) + " = " + String(value));
+       //Debug::verbose("GCodeParser", "Parsed parameter: " + String(toupper(c)) + " = " + String(value));
  
        // Skip to the end of this parameter
        i = valueEnd - 1;
@@ -231,13 +231,13 @@
          String valueStr = command.substring(valueStart, valueEnd);
          int extractedCode = valueStr.toInt();
  
-         Debug::verbose("GCodeParser", "Extracted " + String(codeType) + "-code: " + String(extractedCode));
+         //Debug::verbose("GCodeParser", "Extracted " + String(codeType) + "-code: " + String(extractedCode));
          return extractedCode;
        }
      }
    }
  
-   Debug::warning("GCodeParser", "No valid code found in command");
+   //Debug::warning("GCodeParser", "No valid code found in command");
    return -1; // No valid code found
  }
  
@@ -308,8 +308,7 @@
     if (params.find('X') != params.end() || params.find('Y') != params.end() || params.find('Z') != params.end())
     {
       MovementType moveType = (code == 0) ? RAPID_MOVE : LINEAR_MOVE;
-      Debug::verbose("GCodeParser", "Moving to X:" + String(x) + " Y:" + String(y) + " Z:" + String(z) + 
-                                   " at F:" + String(f) + (moveType == RAPID_MOVE ? " (rapid)" : " (linear)"));
+      //Debug::verbose("GCodeParser", "Moving to X:" + String(x) + " Y:" + String(y) + " Z:" + String(z) + " at F:" + String(f) + (moveType == RAPID_MOVE ? " (rapid)" : " (linear)"));
       return machineController->moveTo(x, y, z, f, moveType);
     }
 
@@ -479,7 +478,7 @@
     }
     else
     {
-      Debug::warning("GCodeParser", "G53 command with no coordinates specified - ignoring");
+      //Debug::warning("GCodeParser", "G53 command with no coordinates specified - ignoring");
     }
     
     return true;

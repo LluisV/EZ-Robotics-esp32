@@ -13,7 +13,7 @@ CommandQueue::CommandQueue(size_t size)
       infoHead(0), infoTail(0), infoCount(0),
       immedHead(0), immedTail(0), immedCount(0)
 {
-  Debug::verbose("CommandQueue", "Constructor called with max size: " + String(size));
+  //Debug::verbose("CommandQueue", "Constructor called with max size: " + String(size));
 
   // Initialize queues
   motionQueue.resize(maxSize);
@@ -30,18 +30,17 @@ CommandQueue::CommandQueue(size_t size)
   }
   else
   {
-    Debug::verbose("CommandQueue", "Mutex created successfully");
+    //Debug::verbose("CommandQueue", "Mutex created successfully");
   }
 }
 
 bool CommandQueue::push(const String &command, CommandType type)
 {
-  Debug::verbose("CommandQueue", "Attempting to push command: " + command +
-                                     " of type " + String(type));
+  //Debug::verbose("CommandQueue", "Attempting to push command: " + command +" of type " + String(type));
 
   if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
-    Debug::warning("CommandQueue", "Failed to acquire mutex for push");
+    //Debug::warning("CommandQueue", "Failed to acquire mutex for push");
     return false;
   }
 
@@ -51,23 +50,19 @@ bool CommandQueue::push(const String &command, CommandType type)
   {
   case MOTION:
     result = pushToQueue(motionQueue, motionHead, motionTail, motionCount, command);
-    Debug::verbose("CommandQueue", "Motion queue push " +
-                                       String(result ? "successful" : "failed"));
+    //Debug::verbose("CommandQueue", "Motion queue push " + String(result ? "successful" : "failed"));
     break;
   case SETTING:
     result = pushToQueue(settingQueue, settingHead, settingTail, settingCount, command);
-    Debug::verbose("CommandQueue", "Setting queue push " +
-                                       String(result ? "successful" : "failed"));
+    //Debug::verbose("CommandQueue", "Setting queue push " + String(result ? "successful" : "failed"));
     break;
   case INFO:
     result = pushToQueue(infoQueue, infoHead, infoTail, infoCount, command);
-    Debug::verbose("CommandQueue", "Info queue push " +
-                                       String(result ? "successful" : "failed"));
+    //Debug::verbose("CommandQueue", "Info queue push " + String(result ? "successful" : "failed"));
     break;
   case IMMEDIATE:
     result = pushToQueue(immediateQueue, immedHead, immedTail, immedCount, command);
-    Debug::verbose("CommandQueue", "Immediate queue push " +
-                                       String(result ? "successful" : "failed"));
+    //Debug::verbose("CommandQueue", "Immediate queue push " + String(result ? "successful" : "failed"));
     break;
   }
 
@@ -80,7 +75,7 @@ String CommandQueue::pop()
 
   if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
-    Debug::warning("CommandQueue", "Failed to acquire mutex for pop");
+    //Debug::warning("CommandQueue", "Failed to acquire mutex for pop");
     return "";
   }
 
@@ -90,22 +85,22 @@ String CommandQueue::pop()
   if (immedCount > 0)
   {
     result = popFromQueue(immediateQueue, immedHead, immedTail, immedCount);
-    Debug::verbose("CommandQueue", "Popped IMMEDIATE command: " + result);
+    //Debug::verbose("CommandQueue", "Popped IMMEDIATE command: " + result);
   }
   else if (infoCount > 0)
   {
     result = popFromQueue(infoQueue, infoHead, infoTail, infoCount);
-    Debug::verbose("CommandQueue", "Popped INFO command: " + result);
+    //Debug::verbose("CommandQueue", "Popped INFO command: " + result);
   }
   else if (settingCount > 0)
   {
     result = popFromQueue(settingQueue, settingHead, settingTail, settingCount);
-    Debug::verbose("CommandQueue", "Popped SETTING command: " + result);
+    //Debug::verbose("CommandQueue", "Popped SETTING command: " + result);
   }
   else if (motionCount > 0)
   {
     result = popFromQueue(motionQueue, motionHead, motionTail, motionCount);
-    Debug::verbose("CommandQueue", "Popped MOTION command: " + result);
+    //Debug::verbose("CommandQueue", "Popped MOTION command: " + result);
   }
 
   xSemaphoreGive(mutex);
@@ -114,11 +109,11 @@ String CommandQueue::pop()
 
 String CommandQueue::peekImmediate() const
 {
-  Debug::verbose("CommandQueue", "Attempting to peek immediate command");
+  //Debug::verbose("CommandQueue", "Attempting to peek immediate command");
 
   if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
-    Debug::warning("CommandQueue", "Failed to acquire mutex for peek");
+    //Debug::warning("CommandQueue", "Failed to acquire mutex for peek");
     return "";
   }
 
@@ -127,7 +122,7 @@ String CommandQueue::peekImmediate() const
   if (immedCount > 0)
   {
     result = immediateQueue[immedHead].command;
-    Debug::verbose("CommandQueue", "Peeked immediate command: " + result);
+    //Debug::verbose("CommandQueue", "Peeked immediate command: " + result);
   }
 
   xSemaphoreGive(mutex);
@@ -139,7 +134,7 @@ String CommandQueue::getNextImmediate()
 
   if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
-    Debug::warning("CommandQueue", "Failed to acquire mutex for get next immediate");
+    //Debug::warning("CommandQueue", "Failed to acquire mutex for get next immediate");
     return "";
   }
 
@@ -148,7 +143,7 @@ String CommandQueue::getNextImmediate()
   if (immedCount > 0)
   {
     result = popFromQueue(immediateQueue, immedHead, immedTail, immedCount);
-    Debug::verbose("CommandQueue", "Got next immediate command: " + result);
+    //Debug::verbose("CommandQueue", "Got next immediate command: " + result);
   }
 
   xSemaphoreGive(mutex);
@@ -159,7 +154,7 @@ bool CommandQueue::isEmpty() const
 {
   if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
-    Debug::warning("CommandQueue", "Failed to acquire mutex for isEmpty");
+    //Debug::warning("CommandQueue", "Failed to acquire mutex for isEmpty");
     return true;
   }
 
@@ -172,11 +167,11 @@ bool CommandQueue::isEmpty() const
 
 bool CommandQueue::isFull(CommandType type) const
 {
-  Debug::verbose("CommandQueue", "Checking if queue type is full: " + String(type));
+  //Debug::verbose("CommandQueue", "Checking if queue type is full: " + String(type));
 
   if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
-    Debug::warning("CommandQueue", "Failed to acquire mutex for isFull");
+    //Debug::warning("CommandQueue", "Failed to acquire mutex for isFull");
     return true;
   }
 
@@ -198,8 +193,7 @@ bool CommandQueue::isFull(CommandType type) const
     break;
   }
 
-  Debug::verbose("CommandQueue", "Queue type " + String(type) +
-                                     " is " + String(full ? "full" : "not full"));
+  //Debug::verbose("CommandQueue", "Queue type " + String(type) + " is " + String(full ? "full" : "not full"));
 
   xSemaphoreGive(mutex);
   return full;
@@ -209,13 +203,13 @@ size_t CommandQueue::size() const
 {
   if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
-    Debug::warning("CommandQueue", "Failed to acquire mutex for size");
+    //Debug::warning("CommandQueue", "Failed to acquire mutex for size");
     return 0;
   }
 
   size_t totalSize = motionCount + settingCount + infoCount + immedCount;
 
-  /*Debug::verbose("CommandQueue", "Total queue size: " + String(totalSize) +
+  /*//Debug::verbose("CommandQueue", "Total queue size: " + String(totalSize) +
                                      " (Motion: " + String(motionCount) +
                                      ", Setting: " + String(settingCount) +
                                      ", Info: " + String(infoCount) +
@@ -231,7 +225,7 @@ void CommandQueue::clear()
 
   if (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) != pdTRUE) 
   {
-    Debug::warning("CommandQueue", "Failed to acquire mutex for clear");
+    //Debug::warning("CommandQueue", "Failed to acquire mutex for clear");
     return;
   }
 
@@ -249,7 +243,7 @@ void CommandQueue::clear()
   immedTail = 0;
   immedCount = 0;
 
-  Debug::verbose("CommandQueue", "All queues reset to initial state");
+  //Debug::verbose("CommandQueue", "All queues reset to initial state");
 
   xSemaphoreGive(mutex);
 }
@@ -259,7 +253,7 @@ bool CommandQueue::pushToQueue(std::vector<QueueItem> &queue, size_t &head,
 {
   if (count >= maxSize)
   {
-    Debug::warning("CommandQueue", "Cannot push to queue. Queue is full");
+    //Debug::warning("CommandQueue", "Cannot push to queue. Queue is full");
     return false;
   }
 
@@ -271,9 +265,7 @@ bool CommandQueue::pushToQueue(std::vector<QueueItem> &queue, size_t &head,
   tail = (tail + 1) % maxSize;
   count++;
 
-  Debug::verbose("CommandQueue", "Pushed command: " + command +
-                                     ", New tail: " + String(tail) +
-                                     ", New count: " + String(count));
+  //Debug::verbose("CommandQueue", "Pushed command: " + command + ", New tail: " + String(tail) + ", New count: " + String(count));
 
   return true;
 }
@@ -283,7 +275,7 @@ String CommandQueue::popFromQueue(std::vector<QueueItem> &queue, size_t &head,
 {
   if (count == 0)
   {
-    Debug::warning("CommandQueue", "Cannot pop from empty queue");
+    //Debug::warning("CommandQueue", "Cannot pop from empty queue");
     return "";
   }
 
@@ -291,9 +283,7 @@ String CommandQueue::popFromQueue(std::vector<QueueItem> &queue, size_t &head,
   head = (head + 1) % maxSize;
   count--;
 
-  Debug::verbose("CommandQueue", "Popped command: " + result +
-                                     ", New head: " + String(head) +
-                                     ", New count: " + String(count));
+  //Debug::verbose("CommandQueue", "Popped command: " + result +", New head: " + String(head) +", New count: " + String(count));
 
   return result;
 }

@@ -63,7 +63,7 @@ bool Scheduler::addLinearMove(const std::vector<float> &targetPos, float feedrat
 
     if (!hasMovement)
     {
-        Debug::verbose("Scheduler", "Skipping zero-distance move");
+        //Debug::verbose("Scheduler", "Skipping zero-distance move");
         return true; // Consider this successful but skip it
     }
 

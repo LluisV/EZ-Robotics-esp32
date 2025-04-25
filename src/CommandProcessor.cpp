@@ -15,7 +15,7 @@ CommandProcessor::CommandProcessor(MachineController *machineController, ConfigM
 
 String CommandProcessor::processInfoCommand(const String &command)
 {
-  Debug::verbose("CommandProcessor", "Processing info command: " + command);
+  //Debug::verbose("CommandProcessor", "Processing info command: " + command);
 
   if (!machineController)
   {
@@ -32,7 +32,7 @@ String CommandProcessor::processInfoCommand(const String &command)
   cleanCmd.trim();
   cleanCmd.toUpperCase();
 
-  Debug::verbose("CommandProcessor", "Cleaned command: " + cleanCmd);
+  //Debug::verbose("CommandProcessor", "Cleaned command: " + cleanCmd);
 
   if (cleanCmd.startsWith("POS"))
   {
@@ -83,8 +83,7 @@ String CommandProcessor::processInfoCommand(const String &command)
                          (triggered ? "TRIGGERED" : "OPEN");
 
         // Log individual endstop states for debugging
-        Debug::verbose("CommandProcessor", "Endstop " + motor->getName() +
-                                               " is " + (triggered ? "TRIGGERED" : "OPEN"));
+        //Debug::verbose("CommandProcessor", "Endstop " + motor->getName() + " is " + (triggered ? "TRIGGERED" : "OPEN"));
       }
     }
 
@@ -202,7 +201,7 @@ String CommandProcessor::processInfoCommand(const String &command)
     return "<RESPONSE:DEBUG_MODE_CHANGE>" + configStr;
   }
 
-  Debug::warning("CommandProcessor", "Unknown info command: " + command);
+  //Debug::warning("CommandProcessor", "Unknown info command: " + command);
   return "<RESPONSE:DEBUG_MODE_CHANGE> Unknown info command: " + command;
 }
 
@@ -260,6 +259,6 @@ bool CommandProcessor::processSettingCommand(const String &command)
   }
 
   // Other setting commands could be added here
-  Debug::warning("CommandProcessor", "Unknown setting command: " + command);
+  //Debug::warning("CommandProcessor", "Unknown setting command: " + command);
   return false; // Unknown setting command
 }

@@ -32,10 +32,10 @@
    }
  
    // Clean up existing motors
-   Debug::verbose("MotorManager", "Cleaning up existing motors");
+   //Debug::verbose("MotorManager", "Cleaning up existing motors");
    for (Motor *motor : motors)
    {
-     Debug::verbose("MotorManager", "Deleting motor: " + (motor ? motor->getName() : "Unknown"));
+     //Debug::verbose("MotorManager", "Deleting motor: " + (motor ? motor->getName() : "Unknown"));
      delete motor;
    }
    motors.clear();
@@ -46,7 +46,7 @@
  
    // Create motors based on configuration
    int numMotors = configManager->getNumMotors();
-   Debug::verbose("MotorManager", "Total motors in configuration: " + String(numMotors));
+   //Debug::verbose("MotorManager", "Total motors in configuration: " + String(numMotors));
  
    int successfulInitCount = 0;
    int failedInitCount = 0;
@@ -56,7 +56,7 @@
      const MotorConfig *motorConfig = configManager->getMotorConfig(i);
      if (motorConfig)
      {
-       Debug::verbose("MotorManager", "Attempting to initialize motor: " + motorConfig->name);
+       //Debug::verbose("MotorManager", "Attempting to initialize motor: " + motorConfig->name);
  
        Motor *motor = new Motor(motorConfig);
        if (motor->initialize(&engine))
@@ -74,7 +74,7 @@
      }
      else
      {
-       Debug::warning("MotorManager", "Null motor configuration at index " + String(i));
+       //Debug::warning("MotorManager", "Null motor configuration at index " + String(i));
        failedInitCount++;
      }
    }
@@ -93,8 +93,7 @@
      return motors[index];
    }
  
-   Debug::warning("MotorManager", "Invalid motor index requested: " + String(index) +
-                                      ". Total motors: " + String(motors.size()));
+   //Debug::warning("MotorManager", "Invalid motor index requested: " + String(index) +". Total motors: " + String(motors.size()));
    return nullptr;
  }
  
@@ -108,7 +107,7 @@
      }
    }
  
-   Debug::warning("MotorManager", "Motor not found with name: " + name);
+   //Debug::warning("MotorManager", "Motor not found with name: " + name);
    return nullptr;
  }
  
@@ -173,9 +172,7 @@
          motors[i]->setSpeed(speedInSteps);
          motors[i]->setAcceleration(config->maxAcceleration); // Usa aceleración predefinida
  
-         Debug::verbose("MotorManager", motors[i]->getName() + " moving to " +
-                                            String(positions[i]) + " at " +
-                                            String(speed) + " units/sec");
+         //Debug::verbose("MotorManager", motors[i]->getName() + " moving to " +String(positions[i]) + " at " +String(speed) + " units/sec");
          
          success &= motors[i]->moveToUnits(positions[i], speed);
      }
@@ -190,8 +187,7 @@
  
    for (Motor *motor : motors)
    {
-     Debug::verbose("MotorManager", "Stopping motor " + motor->getName() +
-                                        String(immediate ? " immediately" : " with deceleration"));
+     //Debug::verbose("MotorManager", "Stopping motor " + motor->getName() +String(immediate ? " immediately" : " with deceleration"));
      motor->stop(immediate);
    }
  }
@@ -210,7 +206,7 @@
      Motor *motor = getMotorByName(axisName);
      if (motor)
      {
-       Debug::verbose("MotorManager", "Homing " + axisName + " axis");
+       //Debug::verbose("MotorManager", "Homing " + axisName + " axis");
        bool axisHomeSuccess = motor->startHoming();
  
        if (!axisHomeSuccess)
@@ -241,12 +237,12 @@
      }
      else
      {
-       Debug::warning("MotorManager", axisName + " axis motor not found");
+       //Debug::warning("MotorManager", axisName + " axis motor not found");
      }
    }
  
    // Home any remaining motors not in the main axes
-   Debug::verbose("MotorManager", "Checking for additional motors to home");
+   //Debug::verbose("MotorManager", "Checking for additional motors to home");
    for (Motor *motor : motors)
    {
      if (motor->getName() != "X" && motor->getName() != "Y" && motor->getName() != "Z")

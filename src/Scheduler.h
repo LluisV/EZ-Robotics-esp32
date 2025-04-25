@@ -83,8 +83,8 @@ private:
     std::deque<Segment> segmentBuffer;         // Buffer of segments
 
     const int MOVE_QUEUE_SIZE = 128;           // Maximum number of moves in queue
-    const int SEGMENT_BUFFER_SIZE = 2000;       // Maximum segments in buffer
-    const float SEGMENT_MAX_LENGTH = 0.15f;     // 0.5mm max segment length
+    const int SEGMENT_BUFFER_SIZE = 1000;       // Maximum segments in buffer
+    const float SEGMENT_MAX_LENGTH = 0.15f;     // 0.15mm max segment length
     const float SEGMENT_BUFFER_THRESHOLD = 0.5f;   // When to start generating more segments (50%)
     
     

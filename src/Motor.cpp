@@ -51,8 +51,7 @@
    if (config->endstopPin >= 0)
    {
      pinMode(config->endstopPin, INPUT_PULLUP);
-     Debug::verbose("Motor", "Configured endstop pin " + String(config->endstopPin) +
-                                 " for motor " + config->name);
+     //Debug::verbose("Motor", "Configured endstop pin " + String(config->endstopPin) +" for motor " + config->name);
    }
  
    Debug::info("Motor", "Initialized motor " + config->name +
@@ -70,7 +69,7 @@
    if (stepper)
    {
      stepper->setSpeedInHz(speedInSteps);
-     Debug::verbose("Motor", getName() + " speed set to " + String(speedInSteps) + " steps/sec");
+     //Debug::verbose("Motor", getName() + " speed set to " + String(speedInSteps) + " steps/sec");
    }
  }
  
@@ -81,7 +80,7 @@
    if (stepper)
    {
      stepper->setAcceleration(acceleration);
-     Debug::verbose("Motor", getName() + " acceleration set to " + String(acceleration) + " steps/sec²");
+     //Debug::verbose("Motor", getName() + " acceleration set to " + String(acceleration) + " steps/sec²");
    }
  }
  
@@ -172,9 +171,7 @@
  {
    if (!stepper || status == HOMING)
    {
-     Debug::warning("Motor", "Cannot move motor " +
-                                 (config ? config->name : "Unknown") +
-                                 ": No stepper or in homing state");
+     //Debug::warning("Motor", "Cannot move motor " +(config ? config->name : "Unknown") +": No stepper or in homing state");
      return false;
    }
  
@@ -182,20 +179,17 @@
    if (speedInHZ > 0)
    {
      stepper->setSpeedInHz(speedInHZ);
-     Debug::verbose("Motor", "Setting custom speed " + String(speedInHZ) +
-                                 " for motor " + config->name);
+     //Debug::verbose("Motor", "Setting custom speed " + String(speedInHZ) +" for motor " + config->name);
    }
    else if (currentSpeed > 0)
    {
      stepper->setSpeedInHz(currentSpeed);
-     Debug::verbose("Motor", "Using stored speed " + String(currentSpeed) +
-                                 " for motor " + config->name);
+     //Debug::verbose("Motor", "Using stored speed " + String(currentSpeed) +" for motor " + config->name);
    }
    else
    {
      stepper->setSpeedInHz(config->maxSpeed);
-     Debug::verbose("Motor", "Using max speed " + String(config->maxSpeed) +
-                                 " for motor " + config->name);
+     //Debug::verbose("Motor", "Using max speed " + String(config->maxSpeed) +" for motor " + config->name);
    }
  
    // Start the move
@@ -205,10 +199,7 @@
    stepper->moveTo(position);
    status = MOVING;
  
-   Debug::verbose("Motor", "Moving " + config->name +
-                               " to position " + String(position) +
-                               " at speed " + String(stepper->getMaxSpeedInMilliHz()) +
-                               ", acceleration " + String(currentAcceleration > 0 ? currentAcceleration : config->maxAcceleration));
+   //Debug::verbose("Motor", "Moving " + config->name +" to position " + String(position) +" at speed " + String(stepper->getMaxSpeedInMilliHz()) +", acceleration " + String(currentAcceleration > 0 ? currentAcceleration : config->maxAcceleration));
  
    return true;
  }
@@ -277,7 +268,7 @@
  
    // Check if endstop is already triggered
    if (isEndstopTriggered()) {
-     Debug::warning("Motor", config->name + " endstop already triggered at start, backing off first");
+     //Debug::warning("Motor", config->name + " endstop already triggered at start, backing off first");
      homingPhase = 2;
      stepper->setSpeedInHz(config->maxSpeed);
      
@@ -323,7 +314,7 @@
    if (status == MOVING && !stepper->isRunning())
    {
      status = IDLE;
-     Debug::verbose("Motor", config->name + " movement completed. Status: IDLE");
+     //Debug::verbose("Motor", config->name + " movement completed. Status: IDLE");
    }
  
    // Handle homing state
@@ -375,7 +366,7 @@
            stepper->setSpeedInHz(config->homeSpeed / 4);     // Slower approach
            stepper->move(config->homingDirection * 1000000); // Large value to ensure we hit the endstop
  
-           Debug::verbose("Motor", "Slowly approaching " + config->name + " endstop");
+           //Debug::verbose("Motor", "Slowly approaching " + config->name + " endstop");
          }
          break;
  
@@ -451,10 +442,7 @@
    bool state = digitalRead(config->endstopPin) == HIGH;
    bool triggered = config->endstopInverted ? !state : state;
  
-   Debug::verbose("Motor", config->name + " endstop check: " +
-                               String(triggered ? "TRIGGERED" : "OPEN") +
-                               " (raw state: " + String(state) +
-                               ", inverted: " + String(config->endstopInverted) + ")");
+   //Debug::verbose("Motor", config->name + " endstop check: " +String(triggered ? "TRIGGERED" : "OPEN") +" (raw state: " + String(state) +", inverted: " + String(config->endstopInverted) + ")");
  
    return triggered;
  }

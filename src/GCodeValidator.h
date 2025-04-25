@@ -53,6 +53,7 @@ public:
    * @return Validation result
    */
   ValidationResult validateFile(const String &filename, int maxErrors = 10);
+  ValidationResult validateOpenFile(File &file, const String &filename, int maxErrors = 10);
 
   /**
    * @brief Format validation errors as a string
