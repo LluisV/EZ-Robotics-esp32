@@ -12,6 +12,7 @@
 #include "FileManager.h"
 #include "JobManager.h"
 #include "Debug.h"
+#include "CPUMonitor.h"
 
 // Forward declarations
 class FileManager;
@@ -218,6 +219,8 @@ private:
   std::vector<float> telemetryWorldBuffer;    // Pre-allocated buffer for world coordinates
   std::vector<float> telemetryVelocityBuffer; // Pre-allocated buffer for velocity
   String telemetryMsgBuffer;                  // Pre-allocated string buffer for telemetry messages
+
+  CPUMonitor *cpuMonitor;  // CPU usage monitor
 
   /**
    * @brief Handle receiving binary data for a file transfer
