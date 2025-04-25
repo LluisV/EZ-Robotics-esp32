@@ -10,8 +10,6 @@
  #include "CommandQueue.h"
  #include "CommandProcessor.h"
  #include "MachineController.h"
- #include "FileManager.h"
- #include "JobManager.h"
  #include "Debug.h"
  #include "CPUMonitor.h"
  
@@ -28,11 +26,8 @@
       * @brief Construct a new GRBLCommunicationManager
       * @param commandQueue Reference to the command queue
       * @param commandProcessor Reference to the command processor
-      * @param fileManager Reference to the file manager
-      * @param jobManager Reference to the job manager
       */
-     GRBLCommunicationManager(CommandQueue *commandQueue, CommandProcessor *commandProcessor,
-                              FileManager *fileManager, JobManager *jobManager);
+     GRBLCommunicationManager(CommandQueue *commandQueue, CommandProcessor *commandProcessor);
  
      /**
       * @brief Initialize the communication manager
@@ -69,8 +64,6 @@
      CommandQueue *commandQueue;         ///< Reference to the command queue
      CommandProcessor *commandProcessor; ///< Reference to the command processor
      MachineController *machineController; ///< Reference to the machine controller
-     FileManager *fileManager;           ///< Reference to the file manager
-     JobManager *jobManager;             ///< Reference to the job manager
  
      char lineBuffer[GRBL_LINE_BUFFER_SIZE]; ///< Buffer for receiving characters
      int lineBufferIndex;                    ///< Current position in line buffer

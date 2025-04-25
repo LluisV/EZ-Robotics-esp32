@@ -5,51 +5,11 @@
 
 #include "GCodeValidator.h"
 
-GCodeValidator::GCodeValidator(FileManager *fileManager, GCodeParser *gCodeParser)
-    : fileManager(fileManager), gCodeParser(gCodeParser)
+GCodeValidator::GCodeValidator(GCodeParser *gCodeParser)
+    :  gCodeParser(gCodeParser)
 {
 }
 
-ValidationResult GCodeValidator::validateFile(const String &filename, int maxErrors)
-{
-  ValidationResult emptyResult;
-  emptyResult.valid = false;
-  emptyResult.lineCount = 0;
-  emptyResult.validCommandCount = 0;
-
-  // Check if file exists
-  if (!fileManager->fileExists(filename))
-  {
-    Debug::error("GCodeValidator", "File not found: " + filename);
-    GCodeError error;
-    error.lineNumber = 0;
-    error.line = "";
-    error.errorDescription = "File not found: " + filename;
-    emptyResult.errors.push_back(error);
-    return emptyResult;
-  }
-
-  // Open the file
-  File file = fileManager->openFile(filename);
-  if (!file)
-  {
-    Debug::error("GCodeValidator", "Failed to open file: " + filename);
-    GCodeError error;
-    error.lineNumber = 0;
-    error.line = "";
-    error.errorDescription = "Failed to open file: " + filename;
-    emptyResult.errors.push_back(error);
-    return emptyResult;
-  }
-
-  // Validate the open file
-  ValidationResult result = validateOpenFile(file, filename, maxErrors);
-  
-  // Close the file
-  file.close();
-  
-  return result;
-}
 
 String GCodeValidator::formatValidationErrors(const ValidationResult &result)
 {
@@ -73,83 +33,6 @@ String GCodeValidator::formatValidationErrors(const ValidationResult &result)
   return output;
 }
 
-ValidationResult GCodeValidator::validateOpenFile(File &file, const String &filename, int maxErrors)
-{
-  ValidationResult result;
-  result.valid = true;
-  result.lineCount = 0;
-  result.validCommandCount = 0;
-
-  Debug::info("GCodeValidator", "Validating file: " + filename);
-
-  // Check if file is valid
-  if (!file)
-  {
-    Debug::error("GCodeValidator", "Invalid file handle for: " + filename);
-    GCodeError error;
-    error.lineNumber = 0;
-    error.line = "";
-    error.errorDescription = "Invalid file handle for: " + filename;
-    result.errors.push_back(error);
-    result.valid = false;
-    return result;
-  }
-
-  // Store the current position in the file to restore it later
-  size_t originalPosition = file.position();
-  file.seek(0); // Start from the beginning
-
-  // Read and validate each line
-  String line;
-  int lineNumber = 0;
-
-  while (fileManager->readLine(file, line))
-  {
-    lineNumber++;
-    result.lineCount++;
-
-    // Preprocess line (strip comments, whitespace)
-    String processedLine = preprocessLine(line);
-
-    // Skip empty lines and comments
-    if (processedLine.length() == 0)
-    {
-      continue;
-    }
-
-    // Validate the line
-    GCodeError error;
-    if (!validateLine(processedLine, lineNumber, error))
-    {
-      result.errors.push_back(error);
-      result.valid = false;
-
-      //Debug::warning("GCodeValidator", "Error in line " + String(lineNumber) + ": " + error.errorDescription);
-
-      // Check if we've reached the maximum number of errors to report
-      if (maxErrors > 0 && result.errors.size() >= (size_t)maxErrors)
-      {
-        //Debug::warning("GCodeValidator", "Maximum error limit reached. Stopping validation.");
-        break;
-      }
-    }
-    else
-    {
-      result.validCommandCount++;
-    }
-  }
-
-  // Restore the original file position
-  file.seek(originalPosition);
-
-  Debug::info("GCodeValidator", "Validation complete: " +
-                                    String(result.valid ? "VALID" : "INVALID") +
-                                    ", Total lines: " + String(result.lineCount) +
-                                    ", Valid commands: " + String(result.validCommandCount) +
-                                    ", Errors: " + String(result.errors.size()));
-
-  return result;
-}
 
 bool GCodeValidator::validateLine(const String &line, int lineNumber, GCodeError &error)
 {

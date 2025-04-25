@@ -8,7 +8,6 @@
 
 #include <Arduino.h>
 #include <vector>
-#include "FileManager.h"
 #include "GCodeParser.h"
 #include "Debug.h"
 
@@ -44,7 +43,7 @@ public:
    * @param fileManager File manager reference
    * @param gCodeParser G-code parser reference for syntax checking
    */
-  GCodeValidator(FileManager *fileManager, GCodeParser *gCodeParser);
+  GCodeValidator(GCodeParser *gCodeParser);
 
   /**
    * @brief Validate a G-code file
@@ -63,7 +62,6 @@ public:
   String formatValidationErrors(const ValidationResult &result);
 
 private:
-  FileManager *fileManager; ///< File manager reference
   GCodeParser *gCodeParser; ///< G-code parser reference
 
   /**

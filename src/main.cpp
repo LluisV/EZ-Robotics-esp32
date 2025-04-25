@@ -1,6 +1,6 @@
 /**
  * @file main.cpp
- * @brief Main application with GRBL protocol support
+ * @brief Main application with GRBL protocol support - simplified version
  */
 
  #include <Arduino.h>
@@ -11,10 +11,7 @@
  #include "GCodeParser.h"
  #include "CommandQueue.h"
  #include "CommandProcessor.h"
- #include "FileManager.h"
- #include "JobManager.h"
- #include "CommunicationManager.h" // Changed from CommunicationManager to GRBLCommunicationManager
- #include "GCodeValidator.h"
+ #include "CommunicationManager.h"
  #include "Scheduler.h"
  
  // Debug configuration
@@ -35,15 +32,12 @@
  GCodeParser *gCodeParser = NULL;
  CommandQueue *commandQueue = NULL;
  CommandProcessor *commandProcessor = NULL;
- FileManager *fileManager = NULL;
- JobManager *jobManager = NULL;
- GRBLCommunicationManager *communicationManager = NULL; // Changed from CommunicationManager to GRBLCommunicationManager
- GCodeValidator *gCodeValidator = NULL;
+ GRBLCommunicationManager *communicationManager = NULL;
  Scheduler *scheduler = NULL;
  
  /**
   * @brief Communication task that runs on Core 0
-  * Handles serial communication, file operations, and command preprocessing
+  * Handles serial communication and command preprocessing
   */
  void communicationTask(void *parameter)
  {
@@ -61,18 +55,6 @@
        {
          communicationManager->update();
        }
- 
-       // Update job manager
-       if (jobManager)
-       {
-         jobManager->update();
-       }
-       
-       // Job manager maintenance - run during idle periods
-       if (jobManager && !motorManager.isAnyMotorMoving())
-       {
-         jobManager->performMaintenanceTasks();
-       }
      }
      catch (const std::exception &e)
      {
@@ -85,10 +67,10 @@
          communicationManager->sendMessage("error:1 System error: " + String(e.what()));
        }
  
-       // Emergency abort any running job
-       if (jobManager)
+       // Emergency stop on error
+       if (machineController)
        {
-         jobManager->emergencyAbortJob("Communication task exception: " + String(e.what()));
+         machineController->emergencyStop();
        }
      }
      catch (...)
@@ -102,10 +84,10 @@
          communicationManager->sendMessage("error:1 System error: Unknown exception");
        }
  
-       // Emergency abort any running job
-       if (jobManager)
+       // Emergency stop on error
+       if (machineController)
        {
-         jobManager->emergencyAbortJob("Communication task unknown exception");
+         machineController->emergencyStop();
        }
      }
  
@@ -165,7 +147,6 @@
                  break;
  
                case GCodeParseResult::QUEUE_FULL:
-                 //Debug::warning("MotionTask", "Scheduler queue full for immediate command, requeueing: " + immediateCmd);
                  if (immediateCmd.startsWith("M112") || immediateCmd.startsWith("STOP"))
                  {
                    machineController->emergencyStop();
@@ -187,7 +168,6 @@
              if(commandQueue->isEmpty())
                continue;
              String command = commandQueue->pop();
-             //Debug::verbose("MotionTask", "Processing command from queue: " + command);
  
              // Parse as G-code
              GCodeParseResult parseResult = gCodeParser->parse(command);
@@ -195,15 +175,9 @@
              {
                case GCodeParseResult::PARSE_ERROR:
                  Debug::error("MotionTask", "Failed to execute command: " + command);
- 
-                 if (jobManager && jobManager->isJobRunning())
-                 {
-                   //Debug::warning("MotionTask", "Command failed during job execution");
-                 }
                  break;
  
                case GCodeParseResult::QUEUE_FULL:
-                 //Debug::warning("MotionTask", "Scheduler queue full, requeueing command: " + command);
                  commandQueue->push(command, IMMEDIATE);
                  break;
  
@@ -236,7 +210,6 @@
    }
  }
  
-
  void setup()
  {
    // Initialize serial communication
@@ -268,7 +241,6 @@
      }
      else
      {
-       //Debug::warning("Main", "ConfigManager init failed on attempt " + String(configInitAttempts));
        delay(500);
      }
    }
@@ -282,7 +254,6 @@
  
    if (!configLoaded)
    {
-     //Debug::warning("Main", "Failed to load configuration, using defaults");
      Serial.println("Failed to load configuration. Using defaults.");
      configManager.useDefaultConfig();
    }
@@ -354,60 +325,9 @@
      Serial.println("Failed to create command processor!");
    }
  
-   // 8. Initialize FileManager
-   Debug::info("Main", "Creating FileManager");
-   fileManager = new FileManager();
-   if (fileManager)
-   {
-     if (!fileManager->initialize(true))
-     {
-       Debug::error("Main", "Failed to initialize FileManager");
-       Serial.println("Failed to initialize file system!");
-     }
-   }
-   else
-   {
-     Debug::error("Main", "Failed to create FileManager");
-     Serial.println("Failed to create file manager!");
-   }
- 
-   // 9. Initialize JobManager
-   Debug::info("Main", "Creating JobManager");
-   jobManager = new JobManager(commandQueue, fileManager);
-   if (!jobManager)
-   {
-     Debug::error("Main", "Failed to create JobManager");
-     Serial.println("Failed to create job manager!");
-   }
- 
-   // Initialize GCodeValidator
-   Debug::info("Main", "Creating GCodeValidator");
-   gCodeValidator = new GCodeValidator(fileManager, gCodeParser);
-   if (!gCodeValidator)
-   {
-     Debug::error("Main", "Failed to create GCodeValidator");
-     Serial.println("Failed to create G-code validator!");
-   }
-   else
-   {
-     // Connect validator to JobManager
-     if (jobManager)
-     {
-       jobManager->setGCodeValidator(gCodeValidator);
-       Debug::info("Main", "GCodeValidator connected to JobManager");
-     }
-   }
- 
-   // Connect CommandProcessor to JobManager
-   if (jobManager && commandProcessor)
-   {
-     Debug::info("Main", "Connecting CommandProcessor to JobManager");
-     jobManager->setCommandProcessor(commandProcessor);
-   }
- 
-   // 10. Initialize GRBL CommunicationManager
+   // 8. Initialize GRBL CommunicationManager
    Debug::info("Main", "Creating GRBLCommunicationManager");
-   communicationManager = new GRBLCommunicationManager(commandQueue, commandProcessor, fileManager, jobManager);
+   communicationManager = new GRBLCommunicationManager(commandQueue, commandProcessor);
    if (communicationManager)
    {
      communicationManager->initialize(115200);
@@ -427,7 +347,7 @@
    xTaskCreatePinnedToCore(
        communicationTask,   // Function to implement the task
        "communicationTask", // Name of the task
-       4096,                // Stack size in words (increased for file operations)
+       4096,                // Stack size in words
        NULL,                // Task input parameter
        1,                   // Priority of the task
        &commTaskHandle,     // Task handle
