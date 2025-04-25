@@ -21,6 +21,12 @@
  #define DEBUG_ENABLED true
  #define DEBUG_LEVEL DEBUG_WARNING
  
+ // External variables for CPU and memory usage tracking
+ extern unsigned long lastCpuUsageCalcTime;
+ extern float cpuUsagePercent;
+ extern float lastCpuLoadTime;
+ extern unsigned long cpuTotalTime;
+ 
  // Task handles for dual-core operation
  TaskHandle_t commTaskHandle = NULL;
  TaskHandle_t motionTaskHandle = NULL;
@@ -262,6 +268,12 @@
    // Initialize debug system
    Debug::begin(DEBUG_ENABLED, 115200);
    Debug::setLevel(DEBUG_LEVEL);
+ 
+   // Initialize CPU usage tracking variables
+   lastCpuUsageCalcTime = 0;
+   cpuUsagePercent = 0.0f;
+   lastCpuLoadTime = 0.0f;
+   cpuTotalTime = 0;
  
    Serial.println("CNC Controller starting...");
    Debug::info("Main", "CNC Controller starting up");
