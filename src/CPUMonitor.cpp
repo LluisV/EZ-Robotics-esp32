@@ -80,55 +80,7 @@
  }
  
  float CPUMonitor::estimateCoreLoad(int coreId) {
-     // This is a simplified approach to estimate core load
-     // It uses ESP32's built-in functions instead of FreeRTOS task statistics
-     
-     // Get the number of tasks running on this core
-     uint32_t taskCount = 0;
-     TaskHandle_t* tasks = nullptr;
-     
-     // A simplified estimation based on system activity
-     // For a more accurate measurement, you would need to enable TRACE_FACILITY in FreeRTOS config
-     
-     // For now, we'll use a heuristic based on the ESP32's performance counters
-     // or return a placeholder value that can be improved later
-     
-     // Return an estimated load between 0-100%
-     // We're using a placeholder calculation that should be replaced with better logic
-     
-     // Simple placeholder - better than nothing but not very accurate
-     static uint32_t lastCycles[2] = {0, 0};
-     static uint32_t lastIdleCycles[2] = {0, 0};
-     
-     uint32_t cycles = ESP.getCycleCount();
-     uint32_t timeDiff = cycles - lastCycles[coreId];
-     lastCycles[coreId] = cycles;
-     
-     // We would need a way to estimate idle cycles, but without direct access
-     // to task info, this is difficult. Using a simplified approach:
-     uint32_t idleCycles = 0;
-     
-     // In a real implementation, you would get idle cycles from the idle task
-     // But since we don't have access to task stats, we'll estimate
-     // This is just a placeholder and will not provide accurate readings
-     if (coreId == 0 && idleTaskHandleCore0 != nullptr) {
-         // Attempt to estimate idle cycles based on idle task state
-         // This is not accurate but better than nothing
-         idleCycles = timeDiff / 2; // Placeholder estimation
-     } else if (coreId == 1 && idleTaskHandleCore1 != nullptr) {
-         idleCycles = timeDiff / 2; // Placeholder estimation
-     }
-     
-     uint32_t idleDiff = idleCycles - lastIdleCycles[coreId];
-     lastIdleCycles[coreId] = idleCycles;
-     
-     float usage = 100.0f - ((float)idleDiff * 100.0f / (float)timeDiff);
-     
-     // Constrain the result to a valid percentage
-     if (usage < 0.0f) usage = 0.0f;
-     if (usage > 100.0f) usage = 100.0f;
-     
-     return usage;
+     return 1.0;
  }
  
  float CPUMonitor::getCore0Usage() const {

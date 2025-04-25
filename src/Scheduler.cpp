@@ -77,8 +77,6 @@ bool Scheduler::addLinearMove(const std::vector<float> &targetPos, float feedrat
     // Add to queue
     moveQueue.push_back(move);
 
-    Debug::verbose("Scheduler", "Added linear move at "
-                                    + String(feedrate, 0) + " mm/min");
     return true;
 }
 
@@ -283,9 +281,6 @@ void Scheduler::applyVelocityAdjustments()
             segment.adjustedVelocities[j] *= scaleFactor;
         }
     }
-
-    Debug::verbose("Scheduler", "Applied velocity adjustments to " +
-    String(segmentBuffer.size()) + " segments");
 }
 
 bool Scheduler::generateSegmentsProgressive(ScheduledMove &move)
@@ -396,13 +391,6 @@ bool Scheduler::generateSegmentsProgressive(ScheduledMove &move)
     if (move.segmentationProgress >= 1.0f)
     {
         moveQueue.pop_front();
-        Debug::verbose("Scheduler", "Move fully segmented into " + 
-                      String(move.totalSegments) + " segments");
-    }
-    else
-    {
-        Debug::verbose("Scheduler", "Move partially segmented: " + 
-                      String((int)(move.segmentationProgress * 100)) + "% complete");
     }
     
     return true;

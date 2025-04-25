@@ -441,7 +441,7 @@
    xTaskCreatePinnedToCore(
        communicationTask,   // Function to implement the task
        "communicationTask", // Name of the task
-       8192,                // Stack size in words (increased for file operations)
+       4096,                // Stack size in words (increased for file operations)
        NULL,                // Task input parameter
        1,                   // Priority of the task
        &commTaskHandle,     // Task handle
@@ -460,9 +460,9 @@
    xTaskCreatePinnedToCore(
        motionTask,        // Function to implement the task
        "motionTask",      // Name of the task
-       4096,              // Stack size in words
+       8192,              // Stack size in words
        NULL,              // Task input parameter
-       1,                 // Priority of the task
+       3,                 // Priority of the task
        &motionTaskHandle, // Task handle
        1                  // Core where the task should run
    );
