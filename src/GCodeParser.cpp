@@ -21,7 +21,7 @@
  }
  
  GCodeParseResult GCodeParser::parse(const String &command)
- {
+{
    //Debug::verbose("GCodeParser", "Parsing command: " + command);
  
    // Ignore empty lines and comments
@@ -129,7 +129,7 @@
      Debug::info("GCodeParser", "Executing: " + command);
  
    return GCodeParseResult::SUCCESS;
- }
+}
  
  std::vector<String> GCodeParser::getSupportedCodes() const
  {

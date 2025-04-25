@@ -183,6 +183,22 @@ bool FileManager::deleteFile(const String &filename)
     return false;
   }
 
+  // First, ensure no open file handles by temporarily ending LittleFS
+  LittleFS.end();
+  
+  // Reinitialize the file system
+  if (!LittleFS.begin()) {
+    Debug::error("FileManager", "Failed to reinitialize file system when trying to delete: " + filename);
+    return false;
+  }
+
+  // Check again if file exists after reinitialization
+  if (!LittleFS.exists(filename)) {
+    Debug::warning("FileManager", "File not found after reinitialization: " + filename);
+    return true; // File is already gone, so consider deletion successful
+  }
+
+  // Now try to delete the file
   if (LittleFS.remove(filename))
   {
     Debug::info("FileManager", "File deleted: " + filename);
@@ -191,6 +207,20 @@ bool FileManager::deleteFile(const String &filename)
   else
   {
     Debug::error("FileManager", "Failed to delete file: " + filename);
+    
+    // If deletion failed, try one more approach: create an empty file to overwrite
+    File file = LittleFS.open(filename, "w");
+    if (file) {
+      file.close();
+      Debug::info("FileManager", "Created empty file to replace: " + filename);
+      
+      // Try deletion again
+      if (LittleFS.remove(filename)) {
+        Debug::info("FileManager", "File deleted on second attempt: " + filename);
+        return true;
+      }
+    }
+    
     return false;
   }
 }
@@ -205,28 +235,39 @@ bool FileManager::readLine(File &file, String &line)
   }
 
   // Read characters until end of line or end of file
-  while (file.available() > 0)
+  char buffer[128]; // Define a constant for maximum line length
+  int bufferIndex = 0;
+  bool lineEndFound = false;
+  
+  while (file.available() > 0 && bufferIndex < 128 - 1 && !lineEndFound)
   {
     char c = file.read();
+    
     if (c == '\n' || c == '\r')
     {
-      // Skip CR and LF
-      // Check for CRLF sequence
+      // Handle CR+LF sequence (Windows-style line endings)
       if (c == '\r' && file.peek() == '\n')
       {
         file.read(); // Skip the LF
       }
-
-      return true;
+      
+      lineEndFound = true;
     }
     else
     {
-      line += c;
+      // Add character to buffer
+      buffer[bufferIndex++] = c;
     }
   }
-
-  // If we get here, we reached EOF
-  return line.length() > 0;
+  
+  // Null-terminate the buffer
+  buffer[bufferIndex] = '\0';
+  
+  // Create the result string
+  line = String(buffer);
+  
+  // Check if we reached end of file without a newline
+  return lineEndFound || bufferIndex > 0;
 }
 
 bool FileManager::fileExists(const String &filename)

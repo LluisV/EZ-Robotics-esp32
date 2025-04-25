@@ -546,3 +546,33 @@ bool MachineController::moveToMachineCoordinates(float x, float y, float z, floa
 
   return moveToMachineCoordinates(positions, feedrate, movementType);
 }
+
+// Add the ability to pause and resume movement to MachineController
+void MachineController::pauseMovement() {
+  if (!motorManager) return;
+  
+  // Store current state if needed
+  // Save what motors were moving
+  
+  // Gradually slow down motors
+  for (int i = 0; i < motorManager->getNumMotors(); i++) {
+    Motor* motor = motorManager->getMotor(i);
+    if (motor && motor->isMoving()) {
+      motor->stop(false); // False means decelerate
+    }
+  }
+  
+  Debug::info("MachineController", "Movement paused");
+}
+
+void MachineController::resumeMovement() {
+  // Attempt to resume motion from current point with current planner state
+  if (motionPlanner) {
+    // The motion planner may need to be modified to support resuming from current position
+    Debug::info("MachineController", "Attempting to resume movement");
+  }
+}
+
+float MachineController::getCurrentFeedrate() const {
+  return currentFeedrate;
+}

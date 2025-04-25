@@ -1,356 +1,158 @@
 /**
- * @file CommunicationManager.cpp
- * @brief Implementation of the CommunicationManager class
+ * @file GRBLCommunicationManager.cpp
+ * @brief Implementation of the GRBLCommunicationManager class
  */
 
 #include "CommunicationManager.h"
 #include "MachineController.h"
-#include <LittleFS.h>
+#include <ArduinoJson.h>
 
-// Timeout for file transfers in milliseconds (5 seconds)
-#define FILE_TRANSFER_TIMEOUT 10000
+// GRBL protocol defines
+#define GRBL_VERSION "1.1f.20230925"
+#define GRBL_LINE_FEED_CHAR '\n'
+#define GRBL_CARRIAGE_RETURN_CHAR '\r'
+#define GRBL_REALTIME_STATUS '?'
+#define GRBL_REALTIME_FEEDHOLD '!'
+#define GRBL_REALTIME_RESUME '~'
+#define GRBL_REALTIME_RESET 0x18 // Ctrl-X
+#define GRBL_REALTIME_SAFETY_DOOR 0x84
 
-// Maximum time between progress updates in milliseconds (1 second)
-#define PROGRESS_UPDATE_INTERVAL 2000
+// Response strings
+#define GRBL_RESPONSE_OK "ok"
+#define GRBL_RESPONSE_ERROR "error:"
+#define GRBL_RESPONSE_ALARM "ALARM:"
+#define GRBL_RESPONSE_INITIALIZED "Grbl " GRBL_VERSION " ['$' for help]"
 
-// Escape sequence for file transfer start/end
-#define FILE_ESCAPE_SEQUENCE "<FILE>"
-#define FILE_END_SEQUENCE "</FILE>"
-
-CommunicationManager::CommunicationManager(CommandQueue *commandQueue, CommandProcessor *commandProcessor,
-                                           FileManager *fileManager, JobManager *jobManager)
+GRBLCommunicationManager::GRBLCommunicationManager(CommandQueue *commandQueue, CommandProcessor *commandProcessor,
+                                                   FileManager *fileManager, JobManager *jobManager)
     : commandQueue(commandQueue),
       commandProcessor(commandProcessor),
       fileManager(fileManager),
       jobManager(jobManager),
-      lineBufferIndex(0)
+      lineBufferIndex(0),
+      autoReportEnabled(false),
+      autoReportIntervalMs(1000), // Default to 1 second
+      lastAutoReportTime(0),
+      feedHoldActive(false),
+      lineNumber(0),
+      awaitingAck(false)
 {
-  // Initialize file transfer state
-  fileTransfer.mode = TRANSFER_IDLE;
-  fileTransfer.bytesTransferred = 0;
-  fileTransfer.fileSize = 0;
-  fileTransfer.error = false;
-  fileTransfer.errorMessage = "";
+  // Initialize machine controller from command processor
+  if (commandProcessor)
+  {
+    machineController = commandProcessor->getMachineController();
+  }
+  else
+  {
+    machineController = nullptr;
+  }
 
-  // Pre-allocate buffers for telemetry
-  int estimatedMotorCount = 3; // Default to 3 motors if not available yet
-  lastReportedPosition.resize(estimatedMotorCount, 0.0f);
-  telemetryWorkBuffer.resize(estimatedMotorCount, 0.0f);
-  telemetryWorldBuffer.resize(estimatedMotorCount, 0.0f);
-  telemetryVelocityBuffer.resize(estimatedMotorCount, 0.0f);
-
-  // Reserve space for telemetry message (avoid string reallocations)
-  telemetryMsgBuffer.reserve(512);
-
-  // Clear line buffer
+  // Initialize line buffer
   resetLineBuffer();
 
+  // Get CPU monitor instance
   cpuMonitor = CPUMonitor::getInstance();
-  cpuMonitor->begin();
+  if (cpuMonitor)
+  {
+    cpuMonitor->begin();
+  }
 }
 
-bool CommunicationManager::initialize(unsigned long baudRate)
+bool GRBLCommunicationManager::initialize(unsigned long baudRate)
 {
   Serial.begin(baudRate);
   delay(100); // Give serial a moment to initialize
 
-  Debug::info("CommunicationManager", "Serial initialized at " + String(baudRate) + " baud");
+  Debug::info("GRBLCommunicationManager", "Serial initialized at " + String(baudRate) + " baud");
+
+  // Send GRBL welcome message to let GCode senders know we're ready
+  Serial.println(GRBL_RESPONSE_INITIALIZED);
 
   return true;
 }
 
-bool CommunicationManager::update()
+bool GRBLCommunicationManager::update()
 {
-  try
+  // Check for CPU usage update
+  if (cpuMonitor)
   {
-    // Check if we're in file receive mode FIRST
-    if (fileTransfer.mode == TRANSFER_RECEIVING)
+    cpuMonitor->update();
+  }
+
+  // Handle incoming data
+  while (Serial.available() > 0)
+  {
+    char c = Serial.read();
+
+    // Check for realtime commands first
+    if (c == GRBL_REALTIME_STATUS || c == GRBL_REALTIME_FEEDHOLD || c == GRBL_REALTIME_RESUME ||
+        c == GRBL_REALTIME_RESET || c == GRBL_REALTIME_SAFETY_DOOR)
     {
-      return handleFileReceiveData();
+      processRealtimeCommand(c);
+      continue; // Skip normal line processing for realtime commands
     }
 
-    // Check for serial data for normal command processing
-    while (Serial.available() > 0)
+    // Normal line processing
+    if (c == GRBL_LINE_FEED_CHAR || c == GRBL_CARRIAGE_RETURN_CHAR)
     {
-      char c = Serial.read();
-
-      // Normal command processing
-      if (c == '\n' || c == '\r')
+      // End of line detected
+      if (lineBufferIndex > 0)
       {
-        // End of line detected
-        if (lineBufferIndex > 0)
-        {
-          // Null terminate the string
-          lineBuffer[lineBufferIndex] = '\0';
+        // Null terminate the string
+        lineBuffer[lineBufferIndex] = '\0';
 
-          // Process the line
-          String line = String(lineBuffer);
+        // Process the line
+        String line = String(lineBuffer);
+        processLine(line);
 
-          // Add try-catch for command processing
-          try
-          {
-            processLine(line);
-          }
-          catch (const std::exception &e)
-          {
-            Debug::error("CommunicationManager", "Exception in processLine: " + String(e.what()));
-            sendMessage("Error: Command processing failed - " + String(e.what()));
-          }
-          catch (...)
-          {
-            Debug::error("CommunicationManager", "Unknown exception in processLine");
-            sendMessage("Error: Command processing failed - Unknown exception");
-          }
-
-          // Reset buffer for next line
-          resetLineBuffer();
-        }
-      }
-      else if (lineBufferIndex < MAX_LINE_LENGTH - 1)
-      {
-        // Add character to buffer
-        lineBuffer[lineBufferIndex++] = c;
-      }
-      else
-      {
-        // Line too long, discard and reset
-        //Debug::warning("CommunicationManager", "Line too long, discarding");
-        sendMessage("Error: Command too long (max " + String(MAX_LINE_LENGTH) + " chars)");
+        // Reset buffer for next line
         resetLineBuffer();
       }
     }
-
-    // Check if we should send a file
-    if (fileTransfer.mode == TRANSFER_SENDING)
+    else if (lineBufferIndex < GRBL_LINE_BUFFER_SIZE - 1)
     {
-      return handleFileSendData();
+      // Add character to buffer
+      lineBuffer[lineBufferIndex++] = c;
     }
-
-    // Check for file transfer timeout
-    if (fileTransfer.mode != TRANSFER_IDLE && checkFileTransferTimeout())
+    else
     {
-      cancelFileTransfer("Timeout");
-      return false;
+      // Line too long, discard and reset
+      Debug::warning("GRBLCommunicationManager", "Line too long, discarding");
+      sendMessage("error:1"); // Line exceeds GRBL buffer
+      resetLineBuffer();
     }
+  }
 
-    return true;
-  }
-  catch (const std::exception &e)
+  // Handle automatic status reporting if enabled
+  if (autoReportEnabled && autoReportIntervalMs > 0)
   {
-    Debug::error("CommunicationManager", "Exception in update: " + String(e.what()));
-    sendMessage("Error: Communication failure - " + String(e.what()));
-    return false;
+    unsigned long currentTime = millis();
+    if (currentTime - lastAutoReportTime >= autoReportIntervalMs)
+    {
+      sendStatusReport(false);
+      lastAutoReportTime = currentTime;
+    }
   }
-  catch (...)
+
+  // Handle command acknowledgment
+  if (awaitingAck)
   {
-    Debug::error("CommunicationManager", "Unknown exception in update");
-    sendMessage("Error: Communication failure - Unknown exception");
-    return false;
+    // In a real implementation, check the state of command execution
+    // and send acknowledgment when appropriate.
+    // For now, we'll just send it immediately for basic functionality.
+    sendAcknowledgment(true);
+    awaitingAck = false;
   }
+
+  return true;
 }
 
-void CommunicationManager::sendMessage(const String &message)
+void GRBLCommunicationManager::sendMessage(const String &message)
 {
   Serial.println(message);
-  //Debug::verbose("CommunicationManager", "Sent message: " + message);
 }
 
-void CommunicationManager::sendStatusUpdate(bool detailed)
-{
-  if (!commandProcessor || !jobManager)
-  {
-    return;
-  }
-
-  MachineController *machineController = commandProcessor->getMachineController();
-  if (!machineController)
-  {
-    return;
-  }
-
-  // Basic status
-  String status = "Status: ";
-  status += machineController->isMoving() ? "MOVING" : "IDLE";
-
-  if (jobManager->isJobRunning())
-  {
-    status += ", Job: " + jobManager->getCurrentJobName() + " (" +
-              String(jobManager->getJobProgress()) + "%)";
-  }
-
-  // Add more detailed status information if requested
-  if (detailed)
-  {
-    // Add endstop status
-    MotorManager *motorManager = machineController->getMotorManager();
-    if (motorManager)
-    {
-      status += "\nEndstops: ";
-      for (int i = 0; i < motorManager->getNumMotors(); i++)
-      {
-        Motor *motor = motorManager->getMotor(i);
-        if (motor)
-        {
-          bool triggered = motor->isEndstopTriggered();
-          status += motor->getName() + ":" + (triggered ? "TRIGGERED" : "OPEN") + " ";
-        }
-      }
-    }
-
-    // Add position information
-    status += "\nPosition (Work): ";
-    std::vector<float> workPositions = machineController->getCurrentWorkPosition();
-    for (size_t i = 0; i < workPositions.size(); i++)
-    {
-      Motor *motor = machineController->getMotorManager()->getMotor(i);
-      if (motor)
-      {
-        status += motor->getName() + ":" + String(workPositions[i], 3) + " ";
-      }
-    }
-
-    status += "\nPosition (World): ";
-    std::vector<float> worldPositions = machineController->getCurrentWorldPosition();
-    for (size_t i = 0; i < worldPositions.size(); i++)
-    {
-      Motor *motor = machineController->getMotorManager()->getMotor(i);
-      if (motor)
-      {
-        status += motor->getName() + ":" + String(worldPositions[i], 3) + " ";
-      }
-    }
-
-    // Add buffer status
-    status += "\nBuffer: " + String(commandQueue->size()) + " commands";
-  }
-
-  sendMessage(status);
-}
-
-bool CommunicationManager::startFileReceive(const String &filename, size_t fileSize)
-{
-  // Check if already in transfer mode
-  if (fileTransfer.mode != TRANSFER_IDLE)
-  {
-    Debug::error("CommunicationManager", "File transfer already in progress");
-    return false;
-  }
-
-  // Validate filename
-  if (filename.length() == 0 || filename.indexOf('/') != 0)
-  {
-    Debug::error("CommunicationManager", "Invalid filename: " + filename);
-    return false;
-  }
-
-  // Check if file already exists
-  if (LittleFS.exists(filename))
-  {
-    // For now, we'll overwrite the file
-    //Debug::warning("CommunicationManager", "File already exists, overwriting: " + filename);
-  }
-
-  // Initialize file transfer state
-  fileTransfer.mode = TRANSFER_RECEIVING;
-  fileTransfer.filename = filename;
-  fileTransfer.fileSize = fileSize;
-  fileTransfer.bytesTransferred = 0;
-  fileTransfer.startTime = millis();
-  fileTransfer.lastUpdate = millis();
-  fileTransfer.error = false;
-  fileTransfer.errorMessage = "";
-
-  // Send acknowledgment
-  sendMessage("Receiving file: " + filename + ", size: " + String(fileSize) + " bytes");
-  sendMessage(FILE_ESCAPE_SEQUENCE);
-
-  Debug::info("CommunicationManager", "Started receiving file: " + filename + ", size: " + String(fileSize));
-
-  return true;
-}
-
-bool CommunicationManager::startFileSend(const String &filename)
-{
-  // Check if already in transfer mode
-  if (fileTransfer.mode != TRANSFER_IDLE)
-  {
-    Debug::error("CommunicationManager", "File transfer already in progress");
-    return false;
-  }
-
-  // Check if file exists
-  if (!LittleFS.exists(filename))
-  {
-    Debug::error("CommunicationManager", "File not found: " + filename);
-    return false;
-  }
-
-  // Get file size
-  File file = LittleFS.open(filename, "r");
-  if (!file)
-  {
-    Debug::error("CommunicationManager", "Failed to open file: " + filename);
-    return false;
-  }
-
-  size_t fileSize = file.size();
-  file.close();
-
-  // Initialize file transfer state
-  fileTransfer.mode = TRANSFER_SENDING;
-  fileTransfer.filename = filename;
-  fileTransfer.fileSize = fileSize;
-  fileTransfer.bytesTransferred = 0;
-  fileTransfer.startTime = millis();
-  fileTransfer.lastUpdate = millis();
-  fileTransfer.error = false;
-  fileTransfer.errorMessage = "";
-
-  // Send start message
-  sendMessage("Sending file: " + filename + ", size: " + String(fileSize) + " bytes");
-  sendMessage(FILE_ESCAPE_SEQUENCE);
-
-  Debug::info("CommunicationManager", "Started sending file: " + filename + ", size: " + String(fileSize));
-
-  return true;
-}
-
-void CommunicationManager::cancelFileTransfer(const String &reason)
-{
-  if (fileTransfer.mode == TRANSFER_IDLE)
-  {
-    return;
-  }
-
-  //Debug::warning("CommunicationManager", "File transfer cancelled: " + reason);
-
-  // Close file if open
-  if (fileTransfer.mode == TRANSFER_RECEIVING)
-  {
-    // Remove incomplete file
-    if (LittleFS.exists(fileTransfer.filename))
-    {
-      LittleFS.remove(fileTransfer.filename);
-    }
-
-    sendMessage(FILE_END_SEQUENCE);
-    sendMessage("File receive cancelled: " + reason);
-  }
-  else if (fileTransfer.mode == TRANSFER_SENDING)
-  {
-    sendMessage(FILE_END_SEQUENCE);
-    sendMessage("File send cancelled: " + reason);
-  }
-
-  // Reset file transfer state
-  fileTransfer.mode = TRANSFER_IDLE;
-  fileTransfer.bytesTransferred = 0;
-  fileTransfer.fileSize = 0;
-  fileTransfer.error = true;
-  fileTransfer.errorMessage = reason;
-}
-
-void CommunicationManager::processLine(const String &line)
+void GRBLCommunicationManager::processLine(const String &line)
 {
   // Skip empty lines
   if (line.length() == 0)
@@ -358,812 +160,378 @@ void CommunicationManager::processLine(const String &line)
     return;
   }
 
-  //Debug::verbose("CommunicationManager", "Processing line: " + line);
+  Debug::verbose("GRBLCommunicationManager", "Processing line: " + line);
 
-  // Check for special command prefixes
-  if (line.startsWith("!") || line.startsWith("?"))
+  // Check for system commands (starting with $)
+  if (line.startsWith("$"))
   {
-    if (processSpecialCommand(line))
+    if (handleSystemCommand(line))
     {
-      return;
+      return; // Command was handled
     }
   }
 
-  // Check for file commands
-  if (line.startsWith("@"))
+  // Queue as a regular G-code command
+  if (commandQueue->push(line, MOTION))
   {
-    if (processFileCommand(line))
-    {
-      return;
-    }
-  }
-
-  // Check if this is a file transfer escape sequence
-  if (line == FILE_END_SEQUENCE)
-  {
-    if (fileTransfer.mode == TRANSFER_SENDING)
-    {
-      // End of file transfer
-      fileTransfer.mode = TRANSFER_IDLE;
-      sendMessage("File send completed: " + fileTransfer.filename);
-      Debug::info("CommunicationManager", "File send completed: " + fileTransfer.filename);
-    }
-    return;
-  }
-
-  // Otherwise, queue as a regular G-code command
-  commandQueue->push(line, MOTION);
-  //Debug::verbose("CommunicationManager", "Queued G-code command: " + line);
-}
-
-bool CommunicationManager::processSpecialCommand(const String &command)
-{
-  if (command.startsWith("!"))
-  {
-    // Emergency command - highest priority
-    String cmd = command.substring(1);
-    cmd.trim();
-
-    if (cmd.length() > 0)
-    {
-      // Special case for emergency stop - normalize to M112
-      if (cmd.equalsIgnoreCase("STOP") || cmd.equalsIgnoreCase("EMERGENCY") ||
-          cmd.equalsIgnoreCase("ESTOP"))
-      {
-        cmd = "M112";
-      }
-
-      // Process emergency stop immediately before queuing
-      if (cmd == "M112" && commandProcessor)
-      {
-        commandProcessor->processImmediateCommand(cmd);
-        sendMessage("EMERGENCY STOP ACTIVATED");
-      }
-
-      // Push to immediate queue for processing by motion task
-      commandQueue->push(cmd, IMMEDIATE);
-      Debug::info("CommunicationManager", "Emergency command queued: " + cmd);
-      sendMessage("Emergency command queued: " + cmd);
-
-      return true;
-    }
-  }
-  else if (command.startsWith("?"))
-  {
-    // Information request - handle directly
-    String response = commandProcessor->processInfoCommand(command);
-    if (response.length() > 0)
-    {
-      Debug::info("CommunicationManager", "Sending info response: " + response);
-      sendMessage(response);
-      return true;
-    }
-  }
-
-  return false;
-}
-
-bool CommunicationManager::processFileCommand(const String &command)
-{
-  // File command format: @COMMAND [PARAMETERS]
-  String cmd = command.substring(1);
-  cmd.trim();
-
-  // Split into command and parameters
-  int spaceIndex = cmd.indexOf(' ');
-  String fileCmd = (spaceIndex > 0) ? cmd.substring(0, spaceIndex) : cmd;
-  String params = (spaceIndex > 0) ? cmd.substring(spaceIndex + 1) : "";
-
-  fileCmd.toUpperCase();
-
-  if (fileCmd == "LIST")
-  {
-    // List files
-    if (!fileManager)
-    {
-      sendMessage("Error: File manager not available");
-      return true;
-    }
-
-    String fileList = fileManager->listFiles();
-    sendMessage("File list:\n" + fileList);
-    return true;
-  }
-  else if (fileCmd == "SEND")
-  {
-    // Send file to client
-    if (!fileManager)
-    {
-      sendMessage("Error: File manager not available");
-      return true;
-    }
-
-    params.trim();
-    if (params.length() == 0)
-    {
-      sendMessage("Error: No filename specified");
-      return true;
-    }
-
-    // Make sure filename starts with /
-    if (!params.startsWith("/"))
-    {
-      params = "/" + params;
-    }
-
-    // Start file send
-    if (!startFileSend(params))
-    {
-      sendMessage("Error starting file send: " + params);
-    }
-
-    return true;
-  }
-  else if (fileCmd == "RECEIVE")
-  {
-    // Receive file from client
-    if (!fileManager)
-    {
-      sendMessage("Error: File manager not available");
-      return true;
-    }
-
-    // Parse parameters: FILENAME SIZE
-    int spaceIdx = params.indexOf(' ');
-    if (spaceIdx <= 0)
-    {
-      sendMessage("Error: Invalid parameters. Format: @RECEIVE filename size");
-      return true;
-    }
-
-    String filename = params.substring(0, spaceIdx);
-    filename.trim();
-
-    // Make sure filename starts with /
-    if (!filename.startsWith("/"))
-    {
-      filename = "/" + filename;
-    }
-
-    String sizeStr = params.substring(spaceIdx + 1);
-    sizeStr.trim();
-    size_t fileSize = sizeStr.toInt();
-
-    if (fileSize <= 0)
-    {
-      sendMessage("Error: Invalid file size: " + sizeStr);
-      return true;
-    }
-
-    // First check if the file directory exists and create it if needed
-    String directory = "/";
-    int lastSlash = filename.lastIndexOf('/');
-    if (lastSlash > 0)
-    {
-      directory = filename.substring(0, lastSlash);
-      if (!LittleFS.exists(directory))
-      {
-        if (!LittleFS.mkdir(directory))
-        {
-          Debug::error("FileManager", "Failed to create directory: " + directory);
-          sendMessage("Error: Failed to create directory: " + directory);
-          return true;
-        }
-      }
-    }
-
-    // Remove existing file if it exists (to start fresh)
-    if (LittleFS.exists(filename))
-    {
-      if (!LittleFS.remove(filename))
-      {
-        Debug::error("FileManager", "Failed to delete existing file: " + filename);
-        sendMessage("Error: Failed to delete existing file: " + filename);
-        return true;
-      }
-    }
-
-    // Create an empty file to ensure it exists
-    File newFile = LittleFS.open(filename, "w");
-    if (!newFile)
-    {
-      Debug::error("FileManager", "Failed to create new file: " + filename);
-      sendMessage("Error: Failed to create file: " + filename);
-      return true;
-    }
-    newFile.close();
-
-    // Start file receive
-    if (!startFileReceive(filename, fileSize))
-    {
-      sendMessage("Error starting file receive: " + filename);
-    }
-
-    return true;
-  }
-  else if (fileCmd == "DELETE")
-  {
-    // Delete file
-    if (!fileManager)
-    {
-      sendMessage("Error: File manager not available");
-      return true;
-    }
-
-    params.trim();
-    if (params.length() == 0)
-    {
-      sendMessage("Error: No filename specified");
-      return true;
-    }
-
-    // Make sure filename starts with /
-    if (!params.startsWith("/"))
-    {
-      params = "/" + params;
-    }
-
-    // Delete file
-    if (fileManager->deleteFile(params))
-    {
-      sendMessage("File deleted: " + params);
-    }
-    else
-    {
-      sendMessage("Error deleting file: " + params);
-    }
-
-    return true;
-  }
-  else if (fileCmd == "RUN")
-  {
-    // Run a G-code file
-    if (!fileManager || !jobManager)
-    {
-      sendMessage("Error: File or job manager not available");
-      return true;
-    }
-
-    params.trim();
-    if (params.length() == 0)
-    {
-      sendMessage("Error: No filename specified");
-      return true;
-    }
-
-    // Make sure filename starts with /
-    if (!params.startsWith("/"))
-    {
-      params = "/" + params;
-    }
-
-    // First validate the G-code file
-    GCodeValidator *validator = jobManager->getGCodeValidator();
-    if (validator)
-    {
-      Debug::info("CommunicationManager", "Validating G-code file: " + params);
-      ValidationResult result = jobManager->validateGCodeFile(params);
-
-      if (!result.valid)
-      {
-        // Report validation errors
-        Debug::error("CommunicationManager", "G-code validation failed for: " + params);
-        sendMessage("G-code validation failed. Job not started.");
-        sendMessage("Found " + String(result.errors.size()) + " errors in file.");
-
-        // Send the formatted validation errors
-        if (validator)
-        {
-          String errorReport = validator->formatValidationErrors(result);
-          sendMessage(errorReport);
-        }
-        else
-        {
-          // Send basic error information
-          int errorLimit = min(5, (int)result.errors.size());
-          for (int i = 0; i < errorLimit; i++)
-          {
-            const GCodeError &error = result.errors[i];
-            sendMessage("Line " + String(error.lineNumber) + ": " + error.line);
-            sendMessage("  Error: " + error.errorDescription);
-          }
-
-          if (result.errors.size() > errorLimit)
-          {
-            sendMessage("... and " + String(result.errors.size() - errorLimit) + " more errors.");
-          }
-        }
-
-        return true;
-      }
-
-      Debug::info("CommunicationManager", "G-code validation passed for: " + params);
-      sendMessage("G-code validation passed. Starting job.");
-    }
-    else
-    {
-      //Debug::warning("CommunicationManager", "G-code validator not available. Proceeding without validation.");
-    }
-
-    // Add debug information to understand current state
-    Debug::info("CommunicationManager", "Current job status: " + String(jobManager->getJobStatus()));
-    Debug::info("CommunicationManager", "Command queue size: " + String(commandQueue->size()));
-
-    // Forcibly reset job state if needed
-    if (!jobManager->canStartNewJob())
-    {
-      //Debug::warning("CommunicationManager", "Forcing job manager reset before starting new job");
-      jobManager->stopJob(); // Force reset the job state
-    }
-
-    // Then attempt to start the job
-    if (jobManager->startJob(params))
-    {
-      sendMessage("Job started: " + params);
-    }
-    else
-    {
-      sendMessage("Error starting job: " + params);
-    }
-
-    return true;
-  }
-  else if (fileCmd == "PAUSE")
-  {
-    // Pause current job
-    if (!jobManager)
-    {
-      sendMessage("Error: Job manager not available");
-      return true;
-    }
-
-    if (jobManager->pauseJob())
-    {
-      sendMessage("Job paused");
-    }
-    else
-    {
-      sendMessage("Error pausing job: No active job");
-    }
-
-    return true;
-  }
-  else if (fileCmd == "RESUME")
-  {
-    // Resume current job
-    if (!jobManager)
-    {
-      sendMessage("Error: Job manager not available");
-      return true;
-    }
-
-    if (jobManager->resumeJob())
-    {
-      sendMessage("Job resumed");
-    }
-    else
-    {
-      sendMessage("Error resuming job: No paused job");
-    }
-
-    return true;
-  }
-  else if (fileCmd == "STOP")
-  {
-    // Stop current job
-    if (!jobManager)
-    {
-      sendMessage("Error: Job manager not available");
-      return true;
-    }
-
-    if (jobManager->stopJob())
-    {
-      sendMessage("Job stopped");
-    }
-    else
-    {
-      sendMessage("Error stopping job: No active job");
-    }
-
-    return true;
-  }
-
-  // Unknown file command
-  sendMessage("Unknown file command: " + fileCmd);
-  return true;
-}
-
-bool CommunicationManager::handleFileReceiveData() {
-  if (fileTransfer.mode != TRANSFER_RECEIVING) {
-    Debug::error("CommunicationManager", "File Receive: Not in receive mode");
-    return false;
-  }
-
-  // Only check timeout if no data is being received
-  unsigned long currentTime = millis();
-  if (Serial.available() <= 0 && currentTime - fileTransfer.lastUpdate > FILE_TRANSFER_TIMEOUT) {
-    Debug::error("CommunicationManager",
-                 "File Receive Timeout - Transferred " +
-                     String(fileTransfer.bytesTransferred) +
-                     " of " + String(fileTransfer.fileSize) + " bytes");
-    cancelFileTransfer("Transfer timeout");
-    return false;
-  }
-
-  // Read data in chunks to allow for better flow control
-  const size_t CHUNK_SIZE = 64; // Reduced from 128 to 64 for more stable processing
-
-  if (Serial.available() > 0) {
-    // Calculate how many bytes to read in this iteration
-    size_t bytesRemaining = fileTransfer.fileSize - fileTransfer.bytesTransferred;
-    if (bytesRemaining == 0) {
-      // All bytes received, finalize transfer
-      finalizeFileTransfer();
-      return true;
-    }
-
-    // Limit chunk size to what's available and what's left to receive
-    size_t bytesToRead = min(min((size_t)Serial.available(), CHUNK_SIZE), bytesRemaining);
-
-    if (bytesToRead == 0)
-      return true; // Nothing to read right now
-
-    uint8_t buffer[CHUNK_SIZE];
-    size_t bytesRead = Serial.readBytes(buffer, bytesToRead);
-
-    // Update timeout timer
-    fileTransfer.lastUpdate = currentTime;
-
-    // Open file in append mode - only once per 8 chunks to reduce overhead
-    static File file;
-    static unsigned long lastFileOpenTime = 0;
-    static uint8_t chunkCounter = 0;
-    
-    // Only open/close the file periodically to improve performance
-    if (!file || chunkCounter >= 8) {
-      if (file) {
-        file.flush();
-        file.close();
-      }
-      
-      file = LittleFS.open(fileTransfer.filename, "a");
-      chunkCounter = 0;
-      lastFileOpenTime = currentTime;
-      
-      if (!file) {
-        Debug::error("CommunicationManager", "Failed to open file for writing: " + fileTransfer.filename);
-        cancelFileTransfer("File open error");
-        return false;
-      }
-    }
-    
-    chunkCounter++;
-
-    // Write data to file
-    size_t bytesWritten = file.write(buffer, bytesRead);
-    
-    // Flush every few chunks to ensure data is written
-    if (chunkCounter % 4 == 0) {
-      file.flush();
-    }
-
-    if (bytesWritten != bytesRead) {
-      Debug::error("CommunicationManager", "Write error: " + String(bytesWritten) + "/" + String(bytesRead));
-      if (file) file.close();
-      cancelFileTransfer("Write error");
-      return false;
-    }
-
-    // Update progress
-    fileTransfer.bytesTransferred += bytesWritten;
-
-    // Send progress updates at regular intervals but not too frequently
-    // This helps the sender know we're successfully receiving data without overwhelming the connection
-    if (fileTransfer.bytesTransferred % 1024 == 0 ||  // Every 1KB instead of 512 bytes
-        currentTime - fileTransfer.lastProgressUpdate > PROGRESS_UPDATE_INTERVAL ||
-        fileTransfer.bytesTransferred == fileTransfer.fileSize)
-    {
-      fileTransfer.lastProgressUpdate = currentTime;
-      int progress = (fileTransfer.bytesTransferred * 100) / fileTransfer.fileSize;
-      sendMessage("Progress: " + String(progress) + "% (" +
-                  String(fileTransfer.bytesTransferred) + "/" +
-                  String(fileTransfer.fileSize) + " bytes)");
-                  
-      // Small delay after sending progress updates to avoid buffer conflicts
-      delay(5);
-    }
-
-    // If we've reached the end, finalize the transfer
-    if (fileTransfer.bytesTransferred >= fileTransfer.fileSize) {
-      if (file) {
-        file.flush();
-        file.close();
-      }
-      finalizeFileTransfer();
-    }
-  }
-
-  return true;
-}
-
-void CommunicationManager::finalizeFileTransfer()
-{
-  // Extra verification that file size matches what we expected
-  File file = LittleFS.open(fileTransfer.filename, "r");
-  if (!file)
-  {
-    Debug::error("CommunicationManager", "Failed to open file for verification: " + fileTransfer.filename);
-    cancelFileTransfer("Verification failed");
-    return;
-  }
-
-  size_t actualSize = file.size();
-  file.close();
-
-  if (actualSize != fileTransfer.fileSize)
-  {
-    //Debug::warning("CommunicationManager","File size mismatch - Expected: " + String(fileTransfer.fileSize) +", Actual: " + String(actualSize));
-
-    // If the file is smaller than expected, we're missing data
-    if (actualSize < fileTransfer.fileSize)
-    {
-      cancelFileTransfer("Incomplete file transfer");
-      return;
-    }
-  }
-
-  // Ensure file is properly closed and flushed
-  file = LittleFS.open(fileTransfer.filename, "a");
-  if (file)
-  {
-    file.flush();
-    file.close();
-  }
-
-  // Add a small delay to ensure file system operations complete
-  delay(50);
-
-  // Send completion signals
-  sendMessage(FILE_END_SEQUENCE);
-  sendMessage("File receive completed: " + fileTransfer.filename +
-              " (" + String(fileTransfer.bytesTransferred) + " bytes)");
-
-  Debug::info("CommunicationManager",
-              "File receive fully completed: " + fileTransfer.filename +
-                  " (" + String(fileTransfer.bytesTransferred) + " bytes)");
-
-  // Reset transfer state
-  fileTransfer.mode = TRANSFER_IDLE;
-}
-
-bool CommunicationManager::handleFileSendData()
-{
-  // Make sure we're in send mode
-  if (fileTransfer.mode != TRANSFER_SENDING)
-  {
-    Debug::error("CommunicationManager", "Not in file send mode");
-    return false;
-  }
-
-  // Open the file for reading if not already open
-  File file = LittleFS.open(fileTransfer.filename, "r");
-  if (!file)
-  {
-    Debug::error("CommunicationManager", "Failed to open file for reading: " + fileTransfer.filename);
-    cancelFileTransfer("Failed to open file for reading");
-    return false;
-  }
-
-  // Seek to the current position
-  if (file.seek(fileTransfer.bytesTransferred))
-  {
-    // Read and send data in chunks
-    const size_t bufferSize = 64; // Smaller chunks to avoid overwhelming serial
-    uint8_t buffer[bufferSize];
-
-    size_t bytesToRead = min(file.available(), (int)bufferSize);
-    size_t bytesRead = file.read(buffer, bytesToRead);
-
-    if (bytesRead > 0)
-    {
-      // Write directly to Serial
-      size_t bytesWritten = Serial.write(buffer, bytesRead);
-
-      if (bytesWritten != bytesRead)
-      {
-        Debug::error("CommunicationManager", "Failed to write all bytes to serial");
-        file.close();
-        cancelFileTransfer("Serial write error");
-        return false;
-      }
-
-      // Flush the output
-      Serial.flush();
-
-      // Update transfer state
-      fileTransfer.bytesTransferred += bytesWritten;
-      fileTransfer.lastUpdate = millis();
-
-      // Send progress update periodically
-      if (millis() - fileTransfer.lastUpdate >= PROGRESS_UPDATE_INTERVAL)
-      {
-        int progress = (fileTransfer.bytesTransferred * 100) / fileTransfer.fileSize;
-        sendMessage("\nProgress: " + String(progress) + "%");
-      }
-    }
-
-    // Check if transfer is complete
-    if (fileTransfer.bytesTransferred >= fileTransfer.fileSize)
-    {
-      file.close();
-
-      // Send completion message
-      sendMessage(FILE_END_SEQUENCE);
-      sendMessage("File send completed: " + fileTransfer.filename);
-
-      Debug::info("CommunicationManager", "File send completed: " + fileTransfer.filename);
-
-      // Reset file transfer state
-      fileTransfer.mode = TRANSFER_IDLE;
-    }
-    else
-    {
-      file.close();
-      // Allow some time between chunks to avoid buffer overflows
-      delay(10);
-    }
+    Debug::verbose("GRBLCommunicationManager", "Queued G-code command: " + line);
+    awaitingAck = true; // Mark that we need to send an acknowledgment
   }
   else
   {
-    Debug::error("CommunicationManager", "Failed to seek in file");
-    file.close();
-    cancelFileTransfer("File seek error");
-    return false;
+    // Queue is full
+    sendAcknowledgment(false, 4); // Cannot be queued, buffer full
   }
-
-  return true;
 }
 
-bool CommunicationManager::checkFileTransferTimeout()
+void GRBLCommunicationManager::processRealtimeCommand(char c)
 {
-  if (fileTransfer.mode == TRANSFER_IDLE)
+  switch (c)
   {
-    return false;
-  }
+  case GRBL_REALTIME_STATUS:
+    // Send status report
+    sendStatusReport();
+    break;
 
-  // Check if timeout has occurred
-  if (millis() - fileTransfer.lastUpdate > FILE_TRANSFER_TIMEOUT)
-  {
-    //Debug::warning("CommunicationManager", "File transfer timeout");
-    return true;
-  }
+  case GRBL_REALTIME_FEEDHOLD:
+    // Pause job
+    Debug::info("GRBLCommunicationManager", "Feedhold requested");
+    if (jobManager && jobManager->isJobRunning())
+    {
+      jobManager->pauseJob();
+      feedHoldActive = true;
+    }
+    else if (machineController)
+    {
+      machineController->pauseMovement();
+      feedHoldActive = true;
+    }
+    break;
 
-  return false;
+  case GRBL_REALTIME_RESUME:
+    // Resume job
+    Debug::info("GRBLCommunicationManager", "Resume requested");
+    if (feedHoldActive)
+    {
+      if (jobManager && jobManager->getJobStatus() == JOB_PAUSED)
+      {
+        jobManager->resumeJob();
+      }
+      else if (machineController)
+      {
+        machineController->resumeMovement();
+      }
+      feedHoldActive = false;
+    }
+    break;
+
+  case GRBL_REALTIME_RESET:
+    // Soft reset
+    Debug::info("GRBLCommunicationManager", "Soft reset requested");
+
+    // Stop job and clear queues
+    if (jobManager)
+    {
+      jobManager->stopJob();
+    }
+
+    if (commandQueue)
+    {
+      commandQueue->clear();
+    }
+
+    // Stop all motors
+    if (commandProcessor && commandProcessor->getMachineController())
+    {
+      commandProcessor->getMachineController()->emergencyStop();
+    }
+
+    // Send reset confirmation
+    sendMessage(GRBL_RESPONSE_INITIALIZED);
+    break;
+
+  case GRBL_REALTIME_SAFETY_DOOR:
+    // Safety door - same as feedhold for now
+    Debug::info("GRBLCommunicationManager", "Safety door triggered");
+    if (jobManager && jobManager->isJobRunning())
+    {
+      jobManager->pauseJob();
+      feedHoldActive = true;
+    }
+    break;
+
+  default:
+    // Unhandled realtime command
+    Debug::warning("GRBLCommunicationManager", "Unhandled realtime command: " + String(c));
+    break;
+  }
 }
 
-void CommunicationManager::resetLineBuffer()
+void GRBLCommunicationManager::resetLineBuffer()
 {
-  memset(lineBuffer, 0, MAX_LINE_LENGTH);
+  memset(lineBuffer, 0, GRBL_LINE_BUFFER_SIZE);
   lineBufferIndex = 0;
 }
 
-void CommunicationManager::sendPositionTelemetry(bool force)
+void GRBLCommunicationManager::sendStatusReport(bool detailed)
 {
-  // Skip if telemetry is disabled
-  if (!telemetryEnabled)
-    return;
+  String status = composeStatusReport();
+  sendMessage(status);
+}
 
-  if (cpuMonitor)
+void GRBLCommunicationManager::setStatusReportInterval(unsigned long intervalMs)
+{
+  autoReportEnabled = (intervalMs > 0);
+  autoReportIntervalMs = intervalMs;
+
+  Debug::info("GRBLCommunicationManager", "Auto reporting " +
+                                              String(autoReportEnabled ? "enabled" : "disabled") +
+                                              " with interval " + String(autoReportIntervalMs) + "ms");
+}
+
+void GRBLCommunicationManager::sendAcknowledgment(bool success, int errorCode)
+{
+  if (success)
   {
-    cpuMonitor->update();
+    Serial.println(GRBL_RESPONSE_OK);
+  }
+  else
+  {
+    Serial.println(GRBL_RESPONSE_ERROR + String(errorCode));
+  }
+}
+
+String GRBLCommunicationManager::composeStatusReport()
+{
+  // Get machine controller
+  MachineController *machine = nullptr;
+  if (commandProcessor)
+  {
+    machine = commandProcessor->getMachineController();
   }
 
-  // Get current time
-  unsigned long currentTime = millis();
+  // Default status if no machine controller
+  String machineStatus = "Idle";
+  String machinePosition = "0.000,0.000,0.000";
+  String workPosition = "0.000,0.000,0.000";
+  String feedRate = "0";
+  String spindleSpeed = "0";
 
-  // Check if it's time to send telemetry
-  unsigned long telemetryInterval = 1000 / telemetryFrequency;
-  if (!force && currentTime - lastTelemetryTime < telemetryInterval)
-    return;
-
-  // Ensure machine controller exists
-  if (!commandProcessor)
-    return;
-  MachineController *machineController = commandProcessor->getMachineController();
-  if (!machineController)
-    return;
-
-  // Get current positions using pre-allocated buffers
-  const std::vector<float> &workPosition = machineController->getCurrentWorkPosition();
-  const std::vector<float> &worldPosition = machineController->getCurrentWorldPosition();
-  const std::vector<float> &velocityVector = machineController->getCurrentDesiredVelocityVector();
-
-  // Calculate memory usage
-  uint32_t freeHeap = ESP.getFreeHeap();
-  uint32_t totalHeap = ESP.getHeapSize();
-  float memoryUsagePercent = 100.0f - ((float)freeHeap * 100.0f / (float)totalHeap);
-
-  // Only send if position has changed or force is true
-  if (force ||
-      lastReportedPosition.empty() ||
-      workPosition != lastReportedPosition)
+  // Get job status if applicable
+  if (jobManager && jobManager->isJobRunning())
   {
-    // Use ArduinoJson to create the telemetry message
-    StaticJsonDocument<512> doc; // Size optimized for the telemetry message
-    
-    // Add work coordinates
-    JsonObject work = doc.createNestedObject("work");
-    // Make sure we have at least 3 axes
-    if (workPosition.size() >= 3)
+    machineStatus = "Run";
+    if (feedHoldActive || jobManager->getJobStatus() == JOB_PAUSED)
     {
-      work["X"] = round(workPosition[0] * 1000) / 1000.0f; // Round to 3 decimal places
-      work["Y"] = round(workPosition[1] * 1000) / 1000.0f;
-      work["Z"] = round(workPosition[2] * 1000) / 1000.0f;
+      machineStatus = "Hold";
     }
-    
-    // Add world coordinates
-    JsonObject world = doc.createNestedObject("world");
-    if (worldPosition.size() >= 3)
-    {
-      world["X"] = round(worldPosition[0] * 1000) / 1000.0f;
-      world["Y"] = round(worldPosition[1] * 1000) / 1000.0f;
-      world["Z"] = round(worldPosition[2] * 1000) / 1000.0f;
-    }
-    
-    // Add scalar velocity information
-    float currentVelocity = machineController->getCurrentDesiredVelocity();
-    doc["velocity"] = round(currentVelocity * 1000) / 1000.0f;
-    
-    // Add velocity vector
-    JsonObject velocityObj = doc.createNestedObject("velocityVector");
-    // Make sure we have at least 3 axes
-    if (velocityVector.size() >= 3)
-    {
-      velocityObj["X"] = round(velocityVector[0] * 1000) / 1000.0f;
-      velocityObj["Y"] = round(velocityVector[1] * 1000) / 1000.0f;
-      velocityObj["Z"] = round(velocityVector[2] * 1000) / 1000.0f;
-    }
-    
-    // Add ESP32 temperature
-    float temp = temperatureRead();
-    doc["temperature"] = round(temp * 10) / 10.0f; // Round to 1 decimal place
-    
-    // Add CPU usage
-    if (cpuMonitor) {
-      doc["cpuUsage"] = round(cpuMonitor->getTotalUsage() * 10) / 10.0f;
-      doc["cpuCore0"] = round(cpuMonitor->getCore0Usage() * 10) / 10.0f;
-      doc["cpuCore1"] = round(cpuMonitor->getCore1Usage() * 10) / 10.0f;
-    } else {
-      doc["cpuUsage"] = 0.0f;
-      doc["cpuCore0"] = 0.0f;
-      doc["cpuCore1"] = 0.0f;
-    }
-    
-    // Add memory usage percentage
-    doc["memoryUsage"] = round(memoryUsagePercent * 10) / 10.0f;
-    
-    // Serialize to a pre-allocated buffer (reuse telemetryMsgBuffer)
-    telemetryMsgBuffer = "[TELEMETRY]";
-    
-    // We need to keep separate buffers to avoid mixing the JSON processing with our tag
-    char jsonBuffer[384]; // Adjust size as needed
-    
-    // Serialize the JSON to our buffer
-    serializeJson(doc, jsonBuffer, sizeof(jsonBuffer));
-    
-    // Append JSON to telemetry message
-    telemetryMsgBuffer += jsonBuffer;
-    
-    // Send the message
-    sendMessage(telemetryMsgBuffer);
-
-    // Update tracking variables - copy data to avoid new allocations
-    if (lastReportedPosition.size() != workPosition.size())
-    {
-      lastReportedPosition.resize(workPosition.size());
-    }
-    std::copy(workPosition.begin(), workPosition.end(), lastReportedPosition.begin());
-    lastTelemetryTime = currentTime;
   }
+  else if (machine && machine->isMoving())
+  {
+    machineStatus = "Run";
+    if (feedHoldActive)
+    {
+      machineStatus = "Hold";
+    }
+  }
+
+  // Get position information if available
+  if (machine)
+  {
+    std::vector<float> worldPos = machine->getCurrentWorldPosition();
+    std::vector<float> workPos = machine->getCurrentWorkPosition();
+
+    // Format position strings with 3 decimal places
+    machinePosition = "";
+    workPosition = "";
+
+    for (size_t i = 0; i < worldPos.size() && i < 3; i++)
+    {
+      machinePosition += String(worldPos[i], 3);
+      if (i < 2)
+        machinePosition += ",";
+    }
+
+    for (size_t i = 0; i < workPos.size() && i < 3; i++)
+    {
+      workPosition += String(workPos[i], 3);
+      if (i < 2)
+        workPosition += ",";
+    }
+
+    // Get feedrate
+    feedRate = String(machine->getCurrentFeedrate(), 0);
+  }
+
+  // Format GRBL status report
+  String report = "<" + machineStatus + "|MPos:" + machinePosition + "|WPos:" + workPosition;
+
+  // Add feedrate if running
+  if (machineStatus == "Run" || machineStatus == "Hold")
+  {
+    report += "|FS:" + feedRate + "," + spindleSpeed;
+  }
+
+  // Add buffer information (how many blocks available in planner)
+  if (machine && machine->getMotionPlanner())
+  {
+    int bufferState = 15; // Approximate value, replace with actual planner free blocks
+    report += "|Bf:" + String(bufferState);
+  }
+
+  // Add line number if job is running
+  if (jobManager && jobManager->isJobRunning())
+  {
+    report += "|Ln:" + String(lineNumber);
+  }
+
+  // Close status report
+  report += ">";
+
+  return report;
+}
+
+String GRBLCommunicationManager::composeAlarmMessage(int alarmCode)
+{
+  return GRBL_RESPONSE_ALARM + String(alarmCode);
+}
+
+bool GRBLCommunicationManager::handleSystemCommand(const String &line)
+{
+  // Handle $ commands for GRBL settings and information
+  if (line == "$")
+  {
+    // Display help
+    sendMessage("GRBL ESP32 Compatible Controller");
+    sendMessage("[HLP:$$ $# $G $I $N $x=val $Nx=line $J=line $SLP $C $X $H ~]");
+    return true;
+  }
+  else if (line == "$$")
+  {
+    // Display settings
+    sendMessage("$0=10 (Step pulse time, microseconds)");
+    sendMessage("$1=25 (Step idle delay, milliseconds)");
+    sendMessage("$2=0 (Step pulse invert, mask)");
+    sendMessage("$3=0 (Step direction invert, mask)");
+    sendMessage("$4=0 (Invert step enable pin, boolean)");
+    sendMessage("$5=0 (Invert limit pins, boolean)");
+    sendMessage("$6=0 (Invert probe pin, boolean)");
+    sendMessage("$10=1 (Status report options, mask)");
+    sendMessage("$11=0.010 (Junction deviation, millimeters)");
+    sendMessage("$12=0.002 (Arc tolerance, millimeters)");
+    sendMessage("$13=0 (Report in inches, boolean)");
+    sendMessage("$20=0 (Soft limits enable, boolean)");
+    sendMessage("$21=0 (Hard limits enable, boolean)");
+    sendMessage("$22=1 (Homing cycle enable, boolean)");
+    sendMessage("$23=3 (Homing direction invert, mask)");
+    sendMessage("$24=25.000 (Homing locate feed rate, mm/min)");
+    sendMessage("$25=500.000 (Homing search seek rate, mm/min)");
+    sendMessage("$26=250 (Homing switch debounce delay, milliseconds)");
+    sendMessage("$27=1.000 (Homing switch pull-off distance, millimeters)");
+    sendMessage("$30=1000 (Maximum spindle speed, RPM)");
+    sendMessage("$31=0 (Minimum spindle speed, RPM)");
+    sendMessage("$32=0 (Laser mode enable, boolean)");
+    sendMessage("$100=250.000 (X-axis travel resolution, step/mm)");
+    sendMessage("$101=250.000 (Y-axis travel resolution, step/mm)");
+    sendMessage("$102=250.000 (Z-axis travel resolution, step/mm)");
+    sendMessage("$110=500.000 (X-axis maximum rate, mm/min)");
+    sendMessage("$111=500.000 (Y-axis maximum rate, mm/min)");
+    sendMessage("$112=500.000 (Z-axis maximum rate, mm/min)");
+    sendMessage("$120=10.000 (X-axis acceleration, mm/sec^2)");
+    sendMessage("$121=10.000 (Y-axis acceleration, mm/sec^2)");
+    sendMessage("$122=10.000 (Z-axis acceleration, mm/sec^2)");
+    sendMessage("$130=200.000 (X-axis maximum travel, millimeters)");
+    sendMessage("$131=200.000 (Y-axis maximum travel, millimeters)");
+    sendMessage("$132=200.000 (Z-axis maximum travel, millimeters)");
+    return true;
+  }
+  else if (line == "$#")
+  {
+    // Display coordinate parameters
+    sendMessage("[G54:0.000,0.000,0.000]");
+    sendMessage("[G55:0.000,0.000,0.000]");
+    sendMessage("[G56:0.000,0.000,0.000]");
+    sendMessage("[G57:0.000,0.000,0.000]");
+    sendMessage("[G58:0.000,0.000,0.000]");
+    sendMessage("[G59:0.000,0.000,0.000]");
+    sendMessage("[G28:0.000,0.000,0.000]");
+    sendMessage("[G30:0.000,0.000,0.000]");
+    sendMessage("[G92:0.000,0.000,0.000]");
+    sendMessage("[TLO:0.000]");
+    sendMessage("[PRB:0.000,0.000,0.000:0]");
+    return true;
+  }
+  else if (line == "$G")
+  {
+    // Display active G-code state
+    sendMessage("[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]");
+    return true;
+  }
+  else if (line == "$I")
+  {
+    // Display build info
+    sendMessage("[VER:" GRBL_VERSION ":ESP32]");
+    sendMessage("[OPT:V,15,128]");
+    return true;
+  }
+  else if (line == "$N")
+  {
+    // Display startup blocks
+    sendMessage("[MSG:No startup line saved]");
+    return true;
+  }
+  else if (line.startsWith("$H"))
+  {
+    // Home axes
+    Debug::info("GRBLCommunicationManager", "Homing command received");
+
+    MachineController *machine = nullptr;
+    if (commandProcessor)
+    {
+      machine = commandProcessor->getMachineController();
+    }
+
+    if (machine)
+    {
+      machine->homeAll();
+      sendAcknowledgment(true);
+    }
+    else
+    {
+      sendAcknowledgment(false, 5); // Homing failed
+    }
+    return true;
+  }
+  else if (line.startsWith("$X"))
+  {
+    // Kill alarm lock
+    Debug::info("GRBLCommunicationManager", "Kill alarm lock received");
+
+    // Just acknowledge, used to reset after alarms
+    sendAcknowledgment(true);
+    return true;
+  }
+  else if (line.startsWith("$10="))
+  {
+    // Set status report options
+    int value = line.substring(4).toInt();
+    Debug::info("GRBLCommunicationManager", "Status report options set to: " + String(value));
+    sendAcknowledgment(true);
+    return true;
+  }
+  else if (line.startsWith("$110="))
+  {
+    // Set status report interval
+    float value = line.substring(5).toFloat();
+    setStatusReportInterval(value * 1000); // Convert to milliseconds
+    sendAcknowledgment(true);
+    return true;
+  }
+
+  // Handle other $ commands as needed
+
+  // If we get here, the command was not recognized
+  Debug::warning("GRBLCommunicationManager", "Unknown system command: " + line);
+  sendAcknowledgment(false, 20); // Unsupported or invalid command
+  return true;
 }

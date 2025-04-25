@@ -1,6 +1,6 @@
 /**
  * @file main.cpp
- * @brief Main application with segmented motion planning for precision movement
+ * @brief Main application with GRBL protocol support
  */
 
  #include <Arduino.h>
@@ -13,7 +13,7 @@
  #include "CommandProcessor.h"
  #include "FileManager.h"
  #include "JobManager.h"
- #include "CommunicationManager.h"
+ #include "CommunicationManager.h" // Changed from CommunicationManager to GRBLCommunicationManager
  #include "GCodeValidator.h"
  #include "Scheduler.h"
  
@@ -37,7 +37,7 @@
  CommandProcessor *commandProcessor = NULL;
  FileManager *fileManager = NULL;
  JobManager *jobManager = NULL;
- CommunicationManager *communicationManager = NULL;
+ GRBLCommunicationManager *communicationManager = NULL; // Changed from CommunicationManager to GRBLCommunicationManager
  GCodeValidator *gCodeValidator = NULL;
  Scheduler *scheduler = NULL;
  
@@ -51,15 +51,6 @@
  
    // Wait for system initialization
    delay(500);
- 
-   unsigned long lastTelemetryTime = 0;
-   unsigned long telemetryInterval = 50; // Default to 20 Hz, will be updated by config
- 
-   // Get telemetry settings from configuration
-   if (communicationManager && communicationManager->getTelemetryFrequency() > 0)
-   {
-     telemetryInterval = 1000 / communicationManager->getTelemetryFrequency();
-   }
  
    while (true)
    {
@@ -76,18 +67,11 @@
        {
          jobManager->update();
        }
- 
-       // Periodic telemetry updates
-       unsigned long currentTime = millis();
-       if (communicationManager)
+       
+       // Job manager maintenance - run during idle periods
+       if (jobManager && !motorManager.isAnyMotorMoving())
        {
-         // Check if it's time for a telemetry update
-         if (currentTime - lastTelemetryTime >= telemetryInterval)
-         {
-           communicationManager->sendPositionTelemetry(true);
-           // Update last telemetry time
-           lastTelemetryTime = currentTime;
-         }
+         jobManager->performMaintenanceTasks();
        }
      }
      catch (const std::exception &e)
@@ -98,7 +82,7 @@
        // Report the error
        if (communicationManager)
        {
-         communicationManager->sendMessage("System error: " + String(e.what()));
+         communicationManager->sendMessage("error:1 System error: " + String(e.what()));
        }
  
        // Emergency abort any running job
@@ -115,7 +99,7 @@
        // Report the error
        if (communicationManager)
        {
-         communicationManager->sendMessage("System error: Unknown exception");
+         communicationManager->sendMessage("error:1 System error: Unknown exception");
        }
  
        // Emergency abort any running job
@@ -135,7 +119,6 @@
   * Handles motion planning and motor control with priority command handling
   * This task only processes commands from the queue and has no direct communication with serial
   */
- // In main.cpp, modify the motion task to minimize delays:
  void motionTask(void *parameter)
  {
    Debug::info("MotionTask", "Task started on Core " + String(xPortGetCoreID()));
@@ -253,6 +236,7 @@
    }
  }
  
+
  void setup()
  {
    // Initialize serial communication
@@ -421,17 +405,19 @@
      jobManager->setCommandProcessor(commandProcessor);
    }
  
-   // 10. Initialize CommunicationManager
-   Debug::info("Main", "Creating CommunicationManager");
-   communicationManager = new CommunicationManager(commandQueue, commandProcessor, fileManager, jobManager);
+   // 10. Initialize GRBL CommunicationManager
+   Debug::info("Main", "Creating GRBLCommunicationManager");
+   communicationManager = new GRBLCommunicationManager(commandQueue, commandProcessor, fileManager, jobManager);
    if (communicationManager)
    {
      communicationManager->initialize(115200);
+     // Set status report interval to 100ms (10Hz) for GCode senders
+     communicationManager->setStatusReportInterval(100);
    }
    else
    {
-     Debug::error("Main", "Failed to create CommunicationManager");
-     Serial.println("Failed to create communication manager!");
+     Debug::error("Main", "Failed to create GRBLCommunicationManager");
+     Serial.println("Failed to create GRBL communication manager!");
    }
  
    // Create FreeRTOS tasks
@@ -473,7 +459,7 @@
    }
  
    Debug::info("Main", "System initialization complete");
-   Serial.println("System ready with segmented motion planner. Send G-code commands to begin.");
+   Serial.println("Grbl system ready. Send G-code commands to begin.");
  
    // Print initial diagnostics
    Debug::printDiagnostics();
@@ -483,12 +469,4 @@
  {
    // Everything is handled by the FreeRTOS tasks
    delay(1000);
- 
-   // Periodic diagnostics
-   /* static unsigned long lastDiagnosticTime = 0;
-    if (Debug::isEnabled() && millis() - lastDiagnosticTime > 60000)
-    { // Every 60 seconds
-      lastDiagnosticTime = millis();
-      Debug::printDiagnostics();
-    }*/
  }
