@@ -93,23 +93,8 @@
     * @return True if the move was started, false otherwise
     */
    bool moveToUnits(float position, float speed = 0.0f);
- 
-   /**
-    * @brief Move the motor relative to current position
-    * @param steps Number of steps to move
-    * @param speed Speed in steps per second (optional)
-    * @return True if the move was started, false otherwise
-    */
-   bool moveRelative(long steps, float speed = 0.0f);
- 
-   /**
-    * @brief Move the motor relative to current position in user units
-    * @param units User units to move (mm or degrees)
-    * @param speed Speed in user units per second (optional)
-    * @return True if the move was started, false otherwise
-    */
-   bool moveRelativeUnits(float units, float speed = 0.0f);
- 
+
+
    /**
     * @brief Stop the motor
     * @param immediate If true, stop immediately without deceleration

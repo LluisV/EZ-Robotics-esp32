@@ -38,7 +38,8 @@
    }
  
    stepper->setDirectionPin(config->dirPin);
-   stepper->setAcceleration(1410065408);
+   stepper->setAcceleration(0x7FFFFFFF);
+   stepper->setForwardPlanningTimeInMs(50);
    stepper->setLinearAcceleration(0);
    stepper->setSpeedInHz(config->maxSpeed);
  
@@ -220,38 +221,6 @@
    return moveTo(steps, stepsPerSec);
  }
  
- 
- bool Motor::moveRelative(long steps, float speed)
- {
-   if (!stepper || status == HOMING)
-   {
-     return false;
-   }
- 
-   // Set speed if specified
-   if (speed > 0)
-   {
-     stepper->setSpeedInHz(speed);
-   }
-   else
-   {
-     stepper->setSpeedInHz(config->maxSpeed);
-   }
- 
- 
-   // Start the move
-   stepper->move(steps);
-   status = MOVING;
- 
-   return true;
- }
- 
- bool Motor::moveRelativeUnits(float units, float speed)
- {
-   long steps = unitsToSteps(units);
-   int stepsPerSec = speed > 0.0f ? unitsToSteps(speed) : 0;
-   return moveRelative(steps, stepsPerSec);
- }
  
  void Motor::stop(bool immediate)
  {
