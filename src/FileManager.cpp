@@ -10,7 +10,7 @@
 const char *GCODE_EXTENSIONS[] = {".gcode", ".gc", ".g", ".nc", ".cnc", ".ngc"};
 const int NUM_GCODE_EXTENSIONS = 6;
 
-FileManager::FileManager() : spiffsInitialized(false)
+FileManager::FileManager() : LittleFSInitialized(false)
 {
 }
 
@@ -19,7 +19,7 @@ bool FileManager::initialize(bool formatIfNeeded)
   Debug::info("FileManager", "Initializing SPIFFS");
 
   // First try mounting SPIFFS normally
-  if (!SPIFFS.begin(false))
+  if (!LittleFS.begin(false))
   {
     //Debug::warning("FileManager", "SPIFFS mount failed");
 
@@ -27,12 +27,12 @@ bool FileManager::initialize(bool formatIfNeeded)
     {
       //Debug::warning("FileManager", "Trying to format SPIFFS");
 
-      if (SPIFFS.format())
+      if (LittleFS.format())
       {
         Debug::info("FileManager", "SPIFFS formatted successfully");
 
         // Try mounting again after format
-        if (!SPIFFS.begin(false))
+        if (!LittleFS.begin(false))
         {
           Debug::error("FileManager", "SPIFFS mount failed even after formatting");
           return false;
@@ -51,12 +51,12 @@ bool FileManager::initialize(bool formatIfNeeded)
     }
   }
 
-  spiffsInitialized = true;
+  LittleFSInitialized = true;
   Debug::info("FileManager", "SPIFFS initialized successfully");
 
   // Print SPIFFS info
-  size_t totalBytes = SPIFFS.totalBytes();
-  size_t usedBytes = SPIFFS.usedBytes();
+  size_t totalBytes = LittleFS.totalBytes();
+  size_t usedBytes = LittleFS.usedBytes();
   Debug::info("FileManager", "SPIFFS total: " + String(totalBytes) + " bytes, used: " +
                                  String(usedBytes) + " bytes, free: " + String(totalBytes - usedBytes) + " bytes");
 
@@ -65,14 +65,14 @@ bool FileManager::initialize(bool formatIfNeeded)
 
 String FileManager::listFiles()
 {
-  if (!spiffsInitialized)
+  if (!LittleFSInitialized)
   {
     Debug::error("FileManager", "SPIFFS not initialized");
     return "Error: File system not initialized";
   }
 
   String fileList = "";
-  File root = SPIFFS.open("/");
+  File root = LittleFS.open("/");
   if (!root)
   {
     Debug::error("FileManager", "Failed to open root directory");
@@ -120,19 +120,19 @@ String FileManager::listFiles()
 
 String FileManager::getFileInfo(const String &filename)
 {
-  if (!spiffsInitialized)
+  if (!LittleFSInitialized)
   {
     Debug::error("FileManager", "SPIFFS not initialized");
     return "Error: File system not initialized";
   }
 
-  if (!SPIFFS.exists(filename))
+  if (!LittleFS.exists(filename))
   {
     Debug::error("FileManager", "File not found: " + filename);
     return "Error: File not found";
   }
 
-  File file = SPIFFS.open(filename, "r");
+  File file = LittleFS.open(filename, "r");
   if (!file)
   {
     Debug::error("FileManager", "Failed to open file: " + filename);
@@ -171,19 +171,19 @@ String FileManager::getFileInfo(const String &filename)
 
 bool FileManager::deleteFile(const String &filename)
 {
-  if (!spiffsInitialized)
+  if (!LittleFSInitialized)
   {
     Debug::error("FileManager", "SPIFFS not initialized");
     return false;
   }
 
-  if (!SPIFFS.exists(filename))
+  if (!LittleFS.exists(filename))
   {
     Debug::error("FileManager", "File not found: " + filename);
     return false;
   }
 
-  if (SPIFFS.remove(filename))
+  if (LittleFS.remove(filename))
   {
     Debug::info("FileManager", "File deleted: " + filename);
     return true;
@@ -231,30 +231,30 @@ bool FileManager::readLine(File &file, String &line)
 
 bool FileManager::fileExists(const String &filename)
 {
-  if (!spiffsInitialized)
+  if (!LittleFSInitialized)
   {
     Debug::error("FileManager", "SPIFFS not initialized");
     return false;
   }
 
-  return SPIFFS.exists(filename);
+  return LittleFS.exists(filename);
 }
 
 size_t FileManager::getFileSize(const String &filename)
 {
-  if (!spiffsInitialized)
+  if (!LittleFSInitialized)
   {
     Debug::error("FileManager", "SPIFFS not initialized");
     return -1;
   }
 
-  if (!SPIFFS.exists(filename))
+  if (!LittleFS.exists(filename))
   {
     Debug::error("FileManager", "File not found: " + filename);
     return -1;
   }
 
-  File file = SPIFFS.open(filename, "r");
+  File file = LittleFS.open(filename, "r");
   if (!file)
   {
     Debug::error("FileManager", "Failed to open file: " + filename);
@@ -269,19 +269,19 @@ size_t FileManager::getFileSize(const String &filename)
 
 File FileManager::openFile(const String &filename)
 {
-  if (!spiffsInitialized)
+  if (!LittleFSInitialized)
   {
-    Debug::error("FileManager", "SPIFFS not initialized");
+    Debug::error("FileManager", "LittleFS not initialized");
     return File();
   }
 
-  if (!SPIFFS.exists(filename))
+  if (!LittleFS.exists(filename))
   {
     Debug::error("FileManager", "File not found: " + filename);
     return File();
   }
 
-  File file = SPIFFS.open(filename, "r");
+  File file = LittleFS.open(filename, "r");
   if (!file)
   {
     Debug::error("FileManager", "Failed to open file: " + filename);
@@ -293,14 +293,14 @@ File FileManager::openFile(const String &filename)
 
 File FileManager::createFile(const String &filename)
 {
-  if (!spiffsInitialized)
+  if (!LittleFSInitialized)
   {
     Debug::error("FileManager", "SPIFFS not initialized");
     return File();
   }
 
   // If file exists, it will be truncated
-  File file = SPIFFS.open(filename, "w");
+  File file = LittleFS.open(filename, "w");
   if (!file)
   {
     Debug::error("FileManager", "Failed to create file: " + filename);
@@ -312,7 +312,7 @@ File FileManager::createFile(const String &filename)
 
 bool FileManager::createResumeFile(const String &filename, int lineNumber)
 {
-  if (!spiffsInitialized)
+  if (!LittleFSInitialized)
   {
     Debug::error("FileManager", "SPIFFS not initialized");
     return false;
@@ -320,7 +320,7 @@ bool FileManager::createResumeFile(const String &filename, int lineNumber)
 
   String resumeFilename = "/resume_info.txt";
 
-  File resumeFile = SPIFFS.open(resumeFilename, "w");
+  File resumeFile = LittleFS.open(resumeFilename, "w");
   if (!resumeFile)
   {
     Debug::error("FileManager", "Failed to create resume file");
@@ -339,39 +339,39 @@ bool FileManager::createResumeFile(const String &filename, int lineNumber)
 
 size_t FileManager::getFreeSpace()
 {
-  if (!spiffsInitialized)
+  if (!LittleFSInitialized)
   {
-    Debug::error("FileManager", "SPIFFS not initialized");
+    Debug::error("FileManager", "LittleFS not initialized");
     return 0;
   }
 
-  return SPIFFS.totalBytes() - SPIFFS.usedBytes();
+  return LittleFS.totalBytes() - LittleFS.usedBytes();
 }
 
 size_t FileManager::getTotalSpace()
 {
-  if (!spiffsInitialized)
+  if (!LittleFSInitialized)
   {
-    Debug::error("FileManager", "SPIFFS not initialized");
+    Debug::error("FileManager", "LittleFS not initialized");
     return 0;
   }
 
-  return SPIFFS.totalBytes();
+  return LittleFS.totalBytes();
 }
 
 bool FileManager::formatFileSystem()
 {
   //Debug::warning("FileManager", "Formatting file system");
 
-  bool result = SPIFFS.format();
+  bool result = LittleFS.format();
 
   if (result)
   {
     Debug::info("FileManager", "File system formatted successfully");
 
     // Remount SPIFFS
-    SPIFFS.begin(false);
-    spiffsInitialized = true;
+    LittleFS.begin(false);
+    LittleFSInitialized = true;
   }
   else
   {
@@ -397,7 +397,7 @@ bool FileManager::isGCodeFile(const String &filename)
   // If no extension, also check if it contains G-code commands by reading first few lines
   if (lowerFilename.indexOf('.') == -1)
   {
-    File file = SPIFFS.open(filename, "r");
+    File file = LittleFS.open(filename, "r");
     if (file)
     {
       // Check first 5 lines for G-code commands

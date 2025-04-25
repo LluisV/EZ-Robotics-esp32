@@ -5,13 +5,13 @@
 
 #include "CommunicationManager.h"
 #include "MachineController.h"
-#include <SPIFFS.h>
+#include <LittleFS.h>
 
 // Timeout for file transfers in milliseconds (5 seconds)
-#define FILE_TRANSFER_TIMEOUT 5000
+#define FILE_TRANSFER_TIMEOUT 10000
 
 // Maximum time between progress updates in milliseconds (1 second)
-#define PROGRESS_UPDATE_INTERVAL 1000
+#define PROGRESS_UPDATE_INTERVAL 2000
 
 // Escape sequence for file transfer start/end
 #define FILE_ESCAPE_SEQUENCE "<FILE>"
@@ -244,7 +244,7 @@ bool CommunicationManager::startFileReceive(const String &filename, size_t fileS
   }
 
   // Check if file already exists
-  if (SPIFFS.exists(filename))
+  if (LittleFS.exists(filename))
   {
     // For now, we'll overwrite the file
     //Debug::warning("CommunicationManager", "File already exists, overwriting: " + filename);
@@ -279,14 +279,14 @@ bool CommunicationManager::startFileSend(const String &filename)
   }
 
   // Check if file exists
-  if (!SPIFFS.exists(filename))
+  if (!LittleFS.exists(filename))
   {
     Debug::error("CommunicationManager", "File not found: " + filename);
     return false;
   }
 
   // Get file size
-  File file = SPIFFS.open(filename, "r");
+  File file = LittleFS.open(filename, "r");
   if (!file)
   {
     Debug::error("CommunicationManager", "Failed to open file: " + filename);
@@ -328,9 +328,9 @@ void CommunicationManager::cancelFileTransfer(const String &reason)
   if (fileTransfer.mode == TRANSFER_RECEIVING)
   {
     // Remove incomplete file
-    if (SPIFFS.exists(fileTransfer.filename))
+    if (LittleFS.exists(fileTransfer.filename))
     {
-      SPIFFS.remove(fileTransfer.filename);
+      LittleFS.remove(fileTransfer.filename);
     }
 
     sendMessage(FILE_END_SEQUENCE);
@@ -541,9 +541,9 @@ bool CommunicationManager::processFileCommand(const String &command)
     if (lastSlash > 0)
     {
       directory = filename.substring(0, lastSlash);
-      if (!SPIFFS.exists(directory))
+      if (!LittleFS.exists(directory))
       {
-        if (!SPIFFS.mkdir(directory))
+        if (!LittleFS.mkdir(directory))
         {
           Debug::error("FileManager", "Failed to create directory: " + directory);
           sendMessage("Error: Failed to create directory: " + directory);
@@ -553,9 +553,9 @@ bool CommunicationManager::processFileCommand(const String &command)
     }
 
     // Remove existing file if it exists (to start fresh)
-    if (SPIFFS.exists(filename))
+    if (LittleFS.exists(filename))
     {
-      if (!SPIFFS.remove(filename))
+      if (!LittleFS.remove(filename))
       {
         Debug::error("FileManager", "Failed to delete existing file: " + filename);
         sendMessage("Error: Failed to delete existing file: " + filename);
@@ -564,7 +564,7 @@ bool CommunicationManager::processFileCommand(const String &command)
     }
 
     // Create an empty file to ensure it exists
-    File newFile = SPIFFS.open(filename, "w");
+    File newFile = LittleFS.open(filename, "w");
     if (!newFile)
     {
       Debug::error("FileManager", "Failed to create new file: " + filename);
@@ -774,18 +774,15 @@ bool CommunicationManager::processFileCommand(const String &command)
   return true;
 }
 
-bool CommunicationManager::handleFileReceiveData()
-{
-  if (fileTransfer.mode != TRANSFER_RECEIVING)
-  {
+bool CommunicationManager::handleFileReceiveData() {
+  if (fileTransfer.mode != TRANSFER_RECEIVING) {
     Debug::error("CommunicationManager", "File Receive: Not in receive mode");
     return false;
   }
 
   // Only check timeout if no data is being received
   unsigned long currentTime = millis();
-  if (Serial.available() <= 0 && currentTime - fileTransfer.lastUpdate > FILE_TRANSFER_TIMEOUT)
-  {
+  if (Serial.available() <= 0 && currentTime - fileTransfer.lastUpdate > FILE_TRANSFER_TIMEOUT) {
     Debug::error("CommunicationManager",
                  "File Receive Timeout - Transferred " +
                      String(fileTransfer.bytesTransferred) +
@@ -795,14 +792,12 @@ bool CommunicationManager::handleFileReceiveData()
   }
 
   // Read data in chunks to allow for better flow control
-  const size_t CHUNK_SIZE = 128; // Read smaller chunks for more frequent progress updates
+  const size_t CHUNK_SIZE = 64; // Reduced from 128 to 64 for more stable processing
 
-  if (Serial.available() > 0)
-  {
+  if (Serial.available() > 0) {
     // Calculate how many bytes to read in this iteration
     size_t bytesRemaining = fileTransfer.fileSize - fileTransfer.bytesTransferred;
-    if (bytesRemaining == 0)
-    {
+    if (bytesRemaining == 0) {
       // All bytes received, finalize transfer
       finalizeFileTransfer();
       return true;
@@ -820,22 +815,42 @@ bool CommunicationManager::handleFileReceiveData()
     // Update timeout timer
     fileTransfer.lastUpdate = currentTime;
 
-    // Open file in append mode
-    File file = SPIFFS.open(fileTransfer.filename, "a");
-    if (!file)
-    {
-      Debug::error("CommunicationManager", "Failed to open file for writing: " + fileTransfer.filename);
-      cancelFileTransfer("File open error");
-      return false;
+    // Open file in append mode - only once per 8 chunks to reduce overhead
+    static File file;
+    static unsigned long lastFileOpenTime = 0;
+    static uint8_t chunkCounter = 0;
+    
+    // Only open/close the file periodically to improve performance
+    if (!file || chunkCounter >= 8) {
+      if (file) {
+        file.flush();
+        file.close();
+      }
+      
+      file = LittleFS.open(fileTransfer.filename, "a");
+      chunkCounter = 0;
+      lastFileOpenTime = currentTime;
+      
+      if (!file) {
+        Debug::error("CommunicationManager", "Failed to open file for writing: " + fileTransfer.filename);
+        cancelFileTransfer("File open error");
+        return false;
+      }
     }
+    
+    chunkCounter++;
 
     // Write data to file
     size_t bytesWritten = file.write(buffer, bytesRead);
-    file.close();
+    
+    // Flush every few chunks to ensure data is written
+    if (chunkCounter % 4 == 0) {
+      file.flush();
+    }
 
-    if (bytesWritten != bytesRead)
-    {
+    if (bytesWritten != bytesRead) {
       Debug::error("CommunicationManager", "Write error: " + String(bytesWritten) + "/" + String(bytesRead));
+      if (file) file.close();
       cancelFileTransfer("Write error");
       return false;
     }
@@ -843,9 +858,9 @@ bool CommunicationManager::handleFileReceiveData()
     // Update progress
     fileTransfer.bytesTransferred += bytesWritten;
 
-    // Send progress updates at regular intervals or after significant chunks
-    // This helps the sender know we're successfully receiving data
-    if (fileTransfer.bytesTransferred % 512 == 0 ||
+    // Send progress updates at regular intervals but not too frequently
+    // This helps the sender know we're successfully receiving data without overwhelming the connection
+    if (fileTransfer.bytesTransferred % 1024 == 0 ||  // Every 1KB instead of 512 bytes
         currentTime - fileTransfer.lastProgressUpdate > PROGRESS_UPDATE_INTERVAL ||
         fileTransfer.bytesTransferred == fileTransfer.fileSize)
     {
@@ -854,11 +869,17 @@ bool CommunicationManager::handleFileReceiveData()
       sendMessage("Progress: " + String(progress) + "% (" +
                   String(fileTransfer.bytesTransferred) + "/" +
                   String(fileTransfer.fileSize) + " bytes)");
+                  
+      // Small delay after sending progress updates to avoid buffer conflicts
+      delay(5);
     }
 
     // If we've reached the end, finalize the transfer
-    if (fileTransfer.bytesTransferred >= fileTransfer.fileSize)
-    {
+    if (fileTransfer.bytesTransferred >= fileTransfer.fileSize) {
+      if (file) {
+        file.flush();
+        file.close();
+      }
       finalizeFileTransfer();
     }
   }
@@ -869,7 +890,7 @@ bool CommunicationManager::handleFileReceiveData()
 void CommunicationManager::finalizeFileTransfer()
 {
   // Extra verification that file size matches what we expected
-  File file = SPIFFS.open(fileTransfer.filename, "r");
+  File file = LittleFS.open(fileTransfer.filename, "r");
   if (!file)
   {
     Debug::error("CommunicationManager", "Failed to open file for verification: " + fileTransfer.filename);
@@ -893,7 +914,7 @@ void CommunicationManager::finalizeFileTransfer()
   }
 
   // Ensure file is properly closed and flushed
-  file = SPIFFS.open(fileTransfer.filename, "a");
+  file = LittleFS.open(fileTransfer.filename, "a");
   if (file)
   {
     file.flush();
@@ -926,7 +947,7 @@ bool CommunicationManager::handleFileSendData()
   }
 
   // Open the file for reading if not already open
-  File file = SPIFFS.open(fileTransfer.filename, "r");
+  File file = LittleFS.open(fileTransfer.filename, "r");
   if (!file)
   {
     Debug::error("CommunicationManager", "Failed to open file for reading: " + fileTransfer.filename);

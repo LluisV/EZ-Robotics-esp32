@@ -7,7 +7,7 @@
 #define FILE_MANAGER_H
 
 #include <Arduino.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include "Debug.h"
 
 // Maximum number of files to be listed (to avoid OOM)
@@ -114,7 +114,7 @@ public:
   bool formatFileSystem();
 
 private:
-  bool spiffsInitialized; ///< Flag to track if SPIFFS is initialized
+  bool LittleFSInitialized; ///< Flag to track if SPIFFS is initialized
 
   /**
    * @brief Check if file is a G-code file
