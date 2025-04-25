@@ -42,7 +42,14 @@
      
      // Private constructor (singleton)
      CPUMonitor();
-          
+     
+     /**
+      * @brief Estimate CPU load for a specific core
+      * @param coreId Core to estimate (0 or 1)
+      * @return Estimated CPU usage percentage (0-100)
+      */
+     float estimateCoreLoad(int coreId);
+           
  public:
      // Singleton getter
      static CPUMonitor* getInstance();
