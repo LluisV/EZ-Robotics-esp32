@@ -1,253 +1,236 @@
 /**
- * @file GRBLCommunicationManager.cpp
- * @brief Implementation of the GRBLCommunicationManager class with JSON telemetry
+ * @file CommunicationManager.cpp
+ * @brief Implementation of the simplified communication manager
  */
 
  #include "CommunicationManager.h"
  #include <ArduinoJson.h>
  
- #define LINE_FEED_CHAR '\n'
- #define CARRIAGE_RETURN_CHAR '\r'
-
- #define GRBL_RESPONSE_OK "ok"
- #define GRBL_RESPONSE_ERROR "error:"
- 
- GRBLCommunicationManager::GRBLCommunicationManager(CommandQueue *commandQueue, CommandProcessor *commandProcessor)
-     : commandQueue(commandQueue),
-       commandProcessor(commandProcessor),
-       lineBufferIndex(0),
-       autoReportEnabled(false),
-       autoReportIntervalMs(1000), // Default to 1 second
-       lastAutoReportTime(0),
-       feedHoldActive(false),
-       lineNumber(0),
-       awaitingAck(false),
-       telemetryEnabled(true),      // Enable telemetry by default
-       telemetryFrequency(5),       // Default to 5Hz
-       lastTelemetryTime(0)
+ CommunicationManager::CommunicationManager(CommandQueue *commandQueue, CommandProcessor *commandProcessor) :
+   commandQueue(commandQueue),
+   commandProcessor(commandProcessor),
+   lineBufferIndex(0),
+   telemetryEnabled(true),
+   telemetryInterval(100),
+   lastTelemetryTime(0)
  {
-     // Initialize machine controller from command processor
-     if (commandProcessor) {
-         machineController = commandProcessor->getMachineController();
-     } else {
-         machineController = nullptr;
-     }
-     
-     // Initialize line buffer
-     resetLineBuffer();
-     
-     // Get CPU monitor instance
-     cpuMonitor = CPUMonitor::getInstance();
-     if (cpuMonitor) {
-         cpuMonitor->begin();
-     }
-     
-     // Pre-allocate buffers to avoid memory fragmentation
-     telemetryMsgBuffer.reserve(512);
-     lastReportedPosition.reserve(3);
+   // Initialize machine controller from command processor
+   machineController = commandProcessor ? commandProcessor->getMachineController() : nullptr;
+   
+   // Initialize line buffer
+   memset(lineBuffer, 0, LINE_BUFFER_SIZE);
+   
+   // Get CPU monitor instance
+   cpuMonitor = CPUMonitor::getInstance();
+   if (cpuMonitor) {
+     cpuMonitor->begin();
+   }
+   
+   // Pre-allocate buffer to avoid memory fragmentation
+   telemetryBuffer.reserve(512);
+   lastReportedPosition.reserve(3);
+   
+   Debug::info("CommunicationManager", "Initialized");
  }
  
- bool GRBLCommunicationManager::initialize(unsigned long baudRate)
+ bool CommunicationManager::initialize(unsigned long baudRate)
  {
-     Serial.begin(baudRate);
-     delay(100); // Give serial a moment to initialize
- 
-     Debug::info("GRBLCommunicationManager", "Serial initialized at " + String(baudRate) + " baud");
-     
-     return true;
+   Serial.begin(baudRate);
+   delay(100); // Give serial time to initialize
+   Debug::info("CommunicationManager", "Serial initialized at " + String(baudRate) + " baud");
+   return true;
  }
  
- bool GRBLCommunicationManager::update()
+ bool CommunicationManager::update()
  {
-     // Check for CPU usage update
-     if (cpuMonitor) {
-         //cpuMonitor->update();
-     }
+   // Update CPU monitor
+   if (cpuMonitor) {
+     cpuMonitor->update();
+   }
+   
+   // Process incoming data
+   while (Serial.available() > 0) {
+     char c = Serial.read();
      
-     // Handle incoming data
-     while (Serial.available() > 0) {
-         char c = Serial.read();
+     // Handle end of line
+     if (c == '\n' || c == '\r') {
+       if (lineBufferIndex > 0) {
+         // Null terminate and process the line
+         lineBuffer[lineBufferIndex] = '\0';
+         processLine(String(lineBuffer));
          
-
-         // Normal line processing
-         if (c == LINE_FEED_CHAR || c == CARRIAGE_RETURN_CHAR) {
-             // End of line detected
-             if (lineBufferIndex > 0) {
-                 // Null terminate the string
-                 lineBuffer[lineBufferIndex] = '\0';
-                 
-                 // Process the line
-                 String line = String(lineBuffer);
-                 processLine(line);
-                 
-                 // Reset buffer for next line
-                 resetLineBuffer();
-             }
-         }
-         else if (lineBufferIndex < GRBL_LINE_BUFFER_SIZE - 1) {
-             // Add character to buffer
-             lineBuffer[lineBufferIndex++] = c;
-         }
-         else {
-             // Line too long, discard and reset
-             Debug::warning("GRBLCommunicationManager", "Line too long, discarding");
-             sendMessage("error:1"); // Line exceeds GRBL buffer
-             resetLineBuffer();
-         }
+         // Reset buffer for next line
+         lineBufferIndex = 0;
+         memset(lineBuffer, 0, LINE_BUFFER_SIZE);
+       }
      }
-     
-     
-     // Handle command acknowledgment
-     if (awaitingAck) {
-         // In a real implementation, check the state of command execution
-         // and send acknowledgment when appropriate.
-         // For now, we'll just send it immediately for basic functionality.
-         sendAcknowledgment(true);
-         awaitingAck = false;
+     // Add character to buffer if space available
+     else if (lineBufferIndex < LINE_BUFFER_SIZE - 1) {
+       lineBuffer[lineBufferIndex++] = c;
      }
-     
-     // Handle telemetry updates
-     sendPositionTelemetry(false);
-
-     return true;
+     // Line too long, discard and reset
+     else {
+       sendMessage("error:1"); // Line exceeds buffer
+       lineBufferIndex = 0;
+       memset(lineBuffer, 0, LINE_BUFFER_SIZE);
+     }
+   }
+   
+   // Send telemetry data if enabled
+   updateTelemetry();
+   
+   return true;
  }
  
- void GRBLCommunicationManager::sendMessage(const String &message)
+ void CommunicationManager::sendMessage(const String &message)
  {
-     Serial.println(message);
+   Serial.println(message);
  }
  
- void GRBLCommunicationManager::processLine(const String &line)
+ void CommunicationManager::setTelemetryEnabled(bool enabled)
  {
-     // Skip empty lines
-     if (line.length() == 0) {
-         return;
-     }
+   telemetryEnabled = enabled;
+   Debug::info("CommunicationManager", "Telemetry " + String(enabled ? "enabled" : "disabled"));
+ }
  
-     Debug::verbose("GRBLCommunicationManager", "Processing line: " + line);
-
-     // Queue as a regular G-code command
-     if (commandQueue->push(line, MOTION)) {
-         Debug::verbose("GRBLCommunicationManager", "Queued G-code command: " + line);
-         awaitingAck = true; // Mark that we need to send an acknowledgment
+ void CommunicationManager::setTelemetryInterval(unsigned long intervalMs)
+ {
+   telemetryInterval = intervalMs > 0 ? intervalMs : 100;
+   Debug::info("CommunicationManager", "Telemetry interval set to " + String(telemetryInterval) + "ms");
+ }
+ 
+ void CommunicationManager::setTelemetryFrequency(int frequency)
+ {
+   if (frequency > 0) {
+     telemetryInterval = 1000 / frequency;
+     Debug::info("CommunicationManager", "Telemetry frequency set to " + String(frequency) + 
+                 "Hz (interval: " + String(telemetryInterval) + "ms)");
+   }
+ }
+ 
+ void CommunicationManager::setStatusReportInterval(unsigned long intervalMs)
+ {
+   // For compatibility with original API
+   setTelemetryInterval(intervalMs);
+ }
+ 
+ void CommunicationManager::processLine(const String &line)
+ {
+   // Skip empty lines
+   if (line.length() == 0) {
+     return;
+   }
+   
+   Debug::verbose("CommunicationManager", "Processing line: " + line);
+   
+   // Check for special commands (immediate, info, or setting)
+   if (line.startsWith("!") || line.startsWith("M112")) {
+     // Push as immediate command
+     if (commandQueue->push(line, IMMEDIATE)) {
+       Debug::info("CommunicationManager", "Queued immediate command: " + line);
      } else {
-         // Queue is full
-         sendAcknowledgment(false, 4); // Cannot be queued, buffer full
+       sendMessage("error:4"); // Cannot queue immediate command
+       Debug::warning("CommunicationManager", "Failed to queue immediate command: " + line);
      }
+   }
+   // Queue as regular command
+   else if (commandQueue->push(line, NORMAL)) {
+     // Normal G-code, acknowledge
+     sendMessage("ok");
+     Debug::verbose("CommunicationManager", "Queued normal command: " + line);
+   } else {
+     // Queue is full
+     sendMessage("error:4"); // Cannot queue command, buffer full
+     Debug::warning("CommunicationManager", "Command queue full, rejected: " + line);
+   }
  }
  
- void GRBLCommunicationManager::resetLineBuffer()
+ void CommunicationManager::updateTelemetry()
  {
-     memset(lineBuffer, 0, GRBL_LINE_BUFFER_SIZE);
-     lineBufferIndex = 0;
- }
- 
- void GRBLCommunicationManager::setStatusReportInterval(unsigned long intervalMs)
- {
-     autoReportEnabled = (intervalMs > 0);
-     autoReportIntervalMs = intervalMs;
+   // Skip if telemetry is disabled or no machine controller
+   if (!telemetryEnabled || !machineController) {
+     return;
+   }
+   
+   // Check if it's time to send telemetry
+   unsigned long currentTime = millis();
+   if (currentTime - lastTelemetryTime < telemetryInterval) {
+     return;
+   }
+   
+   // Get current positions
+   const std::vector<float>& workPosition = machineController->getCurrentWorkPosition();
+   const std::vector<float>& worldPosition = machineController->getCurrentWorldPosition();
+   const std::vector<float>& velocityVector = machineController->getCurrentDesiredVelocityVector();
+   
+   // Only send if position has changed
+   bool positionChanged = lastReportedPosition.empty() || 
+                         workPosition.size() != lastReportedPosition.size();
+   
+   if (!positionChanged) {
+     for (size_t i = 0; i < workPosition.size(); i++) {
+       if (abs(workPosition[i] - lastReportedPosition[i]) > 0.001f) {
+         positionChanged = true;
+         break;
+       }
+     }
+   }
+   
+   if (positionChanged || machineController->isMoving()) {
+     // Clear buffer and build telemetry JSON
+     telemetryBuffer = "[TELEMETRY]{";
      
-     Debug::info("GRBLCommunicationManager", "Auto reporting " + 
-                 String(autoReportEnabled ? "enabled" : "disabled") + 
-                 " with interval " + String(autoReportIntervalMs) + "ms");
- }
- 
- void GRBLCommunicationManager::sendAcknowledgment(bool success, int errorCode)
- {
-     if (success) {
-         Serial.println(GRBL_RESPONSE_OK);
-     } else {
-         Serial.println(GRBL_RESPONSE_ERROR + String(errorCode));
+     // Add position data
+     telemetryBuffer += "\"work\":{";
+     if (workPosition.size() >= 3) {
+       telemetryBuffer += "\"X\":" + String(workPosition[0], 3) + ",";
+       telemetryBuffer += "\"Y\":" + String(workPosition[1], 3) + ",";
+       telemetryBuffer += "\"Z\":" + String(workPosition[2], 3);
      }
- }
- 
- void GRBLCommunicationManager::sendPositionTelemetry(bool force)
- {
-     // Skip if telemetry is disabled
-     if (!telemetryEnabled)
-         return;
- 
-     // Get current time
-     unsigned long currentTime = millis();
- 
-     // Check if it's time to send telemetry
-     unsigned long telemetryInterval = 1000 / telemetryFrequency;
-     if (!force && currentTime - lastTelemetryTime < telemetryInterval)
-         return;
- 
-     // Ensure machine controller exists
-     if (!machineController)
-         return;
- 
-     // Get current positions
-     const std::vector<float>& workPosition = machineController->getCurrentWorkPosition();
-     const std::vector<float>& worldPosition = machineController->getCurrentWorldPosition();
-     const std::vector<float>& velocityVector = machineController->getCurrentDesiredVelocityVector();
- 
-     // Only send if position has changed or force is true
-     if (force ||
-         lastReportedPosition.empty() ||
-         workPosition != lastReportedPosition)
-     {
-         // Clear and reuse the string buffer
-         telemetryMsgBuffer = "[TELEMETRY]{";
-         telemetryMsgBuffer += "\"work\":{";
- 
-         // Make sure we have at least 3 axes
-         if (workPosition.size() >= 3) {
-             telemetryMsgBuffer += "\"X\":" + String(workPosition[0], 3) + ",";
-             telemetryMsgBuffer += "\"Y\":" + String(workPosition[1], 3) + ",";
-             telemetryMsgBuffer += "\"Z\":" + String(workPosition[2], 3);
-         }
- 
-         telemetryMsgBuffer += "},\"world\":{";
- 
-         if (worldPosition.size() >= 3) {
-             telemetryMsgBuffer += "\"X\":" + String(worldPosition[0], 3) + ",";
-             telemetryMsgBuffer += "\"Y\":" + String(worldPosition[1], 3) + ",";
-             telemetryMsgBuffer += "\"Z\":" + String(worldPosition[2], 3);
-         }
- 
-         telemetryMsgBuffer += "},";
- 
-         // Add scalar velocity information
-         float currentVelocity = machineController->getCurrentDesiredVelocity();
-         telemetryMsgBuffer += "\"velocity\":" + String(currentVelocity, 3) + ",";
- 
-         // Add velocity vector
-         telemetryMsgBuffer += "\"velocityVector\":{";
- 
-         // Make sure we have at least 3 axes
-         if (velocityVector.size() >= 3) {
-             telemetryMsgBuffer += "\"X\":" + String(velocityVector[0], 3) + ",";
-             telemetryMsgBuffer += "\"Y\":" + String(velocityVector[1], 3) + ",";
-             telemetryMsgBuffer += "\"Z\":" + String(velocityVector[2], 3);
-         }
- 
-         telemetryMsgBuffer += "},";
- 
-         // Add ESP32 temperature
-         float temp = temperatureRead();
-         telemetryMsgBuffer += "\"temperature\":" + String(temp, 1);
- 
-         // Add CPU usage if available
-         if (cpuMonitor) {
-             telemetryMsgBuffer += ",\"cpuUsage\":" + String(cpuMonitor->getTotalUsage(), 1);
-             telemetryMsgBuffer += ",\"cpuCore0\":" + String(cpuMonitor->getCore0Usage(), 1);
-             telemetryMsgBuffer += ",\"cpuCore1\":" + String(cpuMonitor->getCore1Usage(), 1);
-         }
- 
-         telemetryMsgBuffer += "}";
- 
-         // Send the message
-         sendMessage(telemetryMsgBuffer);
- 
-         // Update tracking variables - copy data to avoid new allocations
-         if (lastReportedPosition.size() != workPosition.size()) {
-             lastReportedPosition.resize(workPosition.size());
-         }
-         std::copy(workPosition.begin(), workPosition.end(), lastReportedPosition.begin());
-         lastTelemetryTime = currentTime;
+     telemetryBuffer += "},\"world\":{";
+     if (worldPosition.size() >= 3) {
+       telemetryBuffer += "\"X\":" + String(worldPosition[0], 3) + ",";
+       telemetryBuffer += "\"Y\":" + String(worldPosition[1], 3) + ",";
+       telemetryBuffer += "\"Z\":" + String(worldPosition[2], 3);
      }
+     telemetryBuffer += "},";
+     
+     // Add current velocity
+     float currentVelocity = machineController->getCurrentVelocity();
+     telemetryBuffer += "\"velocity\":" + String(currentVelocity, 3) + ",";
+     
+     // Add velocity vector if available
+     telemetryBuffer += "\"velocityVector\":{";
+     if (velocityVector.size() >= 3) {
+       telemetryBuffer += "\"X\":" + String(velocityVector[0], 3) + ",";
+       telemetryBuffer += "\"Y\":" + String(velocityVector[1], 3) + ",";
+       telemetryBuffer += "\"Z\":" + String(velocityVector[2], 3);
+     }
+     telemetryBuffer += "},";
+     
+     // Add ESP32 temperature
+     float temp = temperatureRead();
+     telemetryBuffer += "\"temperature\":" + String(temp, 1);
+     
+     // Add CPU usage if available
+     if (cpuMonitor) {
+       telemetryBuffer += ",\"cpuUsage\":" + String(cpuMonitor->getTotalUsage(), 1);
+       telemetryBuffer += ",\"cpuCore0\":" + String(cpuMonitor->getCore0Usage(), 1);
+       telemetryBuffer += ",\"cpuCore1\":" + String(cpuMonitor->getCore1Usage(), 1);
+     }
+     
+     telemetryBuffer += "}";
+     
+     // Send the message
+     sendMessage(telemetryBuffer);
+     
+     // Update tracking variables
+     if (lastReportedPosition.size() != workPosition.size()) {
+       lastReportedPosition.resize(workPosition.size());
+     }
+     for (size_t i = 0; i < workPosition.size(); i++) {
+       lastReportedPosition[i] = workPosition[i];
+     }
+     lastTelemetryTime = currentTime;
+   }
  }
- 

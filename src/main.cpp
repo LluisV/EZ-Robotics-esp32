@@ -32,7 +32,7 @@
  GCodeParser *gCodeParser = NULL;
  CommandQueue *commandQueue = NULL;
  CommandProcessor *commandProcessor = NULL;
- GRBLCommunicationManager *communicationManager = NULL;
+ CommunicationManager *communicationManager = NULL;
  Scheduler *scheduler = NULL;
  
  /**
@@ -327,7 +327,7 @@
  
    // 8. Initialize GRBL CommunicationManager with telemetry
    Debug::info("Main", "Creating GRBLCommunicationManager");
-   communicationManager = new GRBLCommunicationManager(commandQueue, commandProcessor);
+   communicationManager = new CommunicationManager(commandQueue, commandProcessor);
    if (communicationManager)
    {
      communicationManager->initialize(115200);
