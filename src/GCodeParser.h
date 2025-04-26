@@ -1,6 +1,6 @@
 /**
  * @file GCodeParser.h
- * @brief G-code parser for CNC controller
+ * @brief G-code parser for CNC controller with pipeline architecture
  */
 
  #ifndef GCODE_PARSER_H
@@ -9,20 +9,26 @@
  #include <Arduino.h>
  #include <vector>
  #include <map>
- #include "MachineController.h"
+ #include "MotionControl.h"
  #include "CommonTypes.h"
+ 
+ // Forward declarations
+ class MotionControl;
  
  /**
   * @brief G-code parser class
+  * 
+  * Parses GCode commands and forwards them to the Motion Control system
+  * for execution. Handles syntax validation and parameter extraction.
   */
  class GCodeParser
  {
  public:
    /**
     * @brief Construct a new GCodeParser
-    * @param machineController MachineController reference
+    * @param motionControl Reference to the motion control system
     */
-   GCodeParser(MachineController *machineController);
+   GCodeParser(MotionControl* motionControl);
  
    /**
     * @brief Parse and execute a G-code command
@@ -38,9 +44,10 @@
    std::vector<String> getSupportedCodes() const;
  
  private:
-   MachineController *machineController; ///< MachineController reference
-   float lastFeedrate;                   ///< Last used feedrate
+   MotionControl* motionControl;          ///< Reference to motion control system
+   float lastFeedrate;                    ///< Last used feedrate
    std::vector<float> lastTargetPosition; ///< Last commanded target position
+   bool absoluteMode;                     ///< Current coordinate mode (true for absolute, false for relative)
  
    // Last command parameters
    std::map<char, float> lastParams;
@@ -97,9 +104,6 @@
     * @return True if supported, false otherwise
     */
    bool isMCodeSupported(int code) const;
- 
- private:
-   Scheduler* motionPlanner;
  };
  
  #endif // GCODE_PARSER_H

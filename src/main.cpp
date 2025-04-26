@@ -1,6 +1,9 @@
 /**
  * @file main.cpp
- * @brief Main application with GRBL protocol support and JSON telemetry
+ * @brief Main application with GRBL-inspired pipeline architecture
+ * 
+ * Implements a pipeline architecture similar to GRBL:
+ * Line Buffer → GCode Parser → Motion Control → Planner → Segment Generator → Motors
  */
 
  #include <Arduino.h>
@@ -8,11 +11,12 @@
  #include "ConfigManager.h"
  #include "MotorManager.h"
  #include "MachineController.h"
+ #include "MotionControl.h"
+ #include "Planner.h"
+ #include "SegmentGenerator.h"
  #include "GCodeParser.h"
- #include "CommandQueue.h"
- #include "CommandProcessor.h"
- #include "CommunicationManager.h" // GRBL communication manager with telemetry
- #include "Scheduler.h"
+ #include "LineBuffer.h"
+ #include "CommunicationManager.h"
  
  // Debug configuration
  #define DEBUG_ENABLED true
@@ -22,22 +26,20 @@
  TaskHandle_t commTaskHandle = NULL;
  TaskHandle_t motionTaskHandle = NULL;
  
- // Command queue parameters
- #define COMMAND_QUEUE_SIZE 500
- 
  // Global objects
  ConfigManager configManager;
  MotorManager motorManager;
- MachineController *machineController = NULL;
- GCodeParser *gCodeParser = NULL;
- CommandQueue *commandQueue = NULL;
- CommandProcessor *commandProcessor = NULL;
- CommunicationManager *communicationManager = NULL;
- Scheduler *scheduler = NULL;
+ MachineController* machineController = NULL;
+ MotionControl* motionControl = NULL;
+ Planner* planner = NULL;
+ SegmentGenerator* segmentGenerator = NULL;
+ GCodeParser* gCodeParser = NULL;
+ LineBuffer* lineBuffer = NULL;
+ CommunicationManager* communicationManager = NULL;
  
  /**
   * @brief Communication task that runs on Core 0
-  * Handles serial communication and command preprocessing
+  * Handles serial communication and buffering incoming lines
   */
  void communicationTask(void *parameter)
  {
@@ -98,114 +100,101 @@
  
  /**
   * @brief Motion control task that runs on Core 1
-  * Handles motion planning and motor control with priority command handling
-  * This task only processes commands from the queue and has no direct communication with serial
+  * Processes the execution pipeline from GCode parsing to motor control
   */
  void motionTask(void *parameter)
  {
    Debug::info("MotionTask", "Task started on Core " + String(xPortGetCoreID()));
    
-   String pendingCommand = "";
    unsigned long lastCommandTime = 0;
    const unsigned long COMMAND_INTERVAL = 10; // Process commands every 10ms
+   
+   // Keep track of the current command being processed
+   String currentCommand = "";
+   bool retryingCommand = false;
  
    while (true)
    {
      try
      {
-       // Process segments from the scheduler - HIGHEST PRIORITY
-       if (scheduler) { 
-         // Execute the next movement segment
-         scheduler->executeNextSegment();
+       // Step 1: Update segment generator and execute segments
+       if (segmentGenerator) { 
+         segmentGenerator->update();
        }
  
-       // Process commands from queue less frequently
+       // Step 2: Process GCode from the line buffer less frequently
        unsigned long currentTime = millis();
        if (currentTime - lastCommandTime >= COMMAND_INTERVAL) {
          lastCommandTime = currentTime;
          
-         // Process commands from queue
-         if (machineController && gCodeParser && commandQueue && !commandQueue->isEmpty())
-         {
-           // First check for immediate commands
-           String immediateCmd = commandQueue->getNextImmediate();
-           if (immediateCmd.length() > 0)
-           {
-             Debug::info("MotionTask", "Processing immediate command: " + immediateCmd);
- 
-             // Process immediate command
-             GCodeParseResult parseResult = gCodeParser->parse(immediateCmd);
-             switch (parseResult)
-             {
-               case GCodeParseResult::PARSE_ERROR:
-                 Debug::error("MotionTask", "Failed to execute immediate command: " + immediateCmd);
- 
-                 if (immediateCmd.startsWith("M112") || immediateCmd.startsWith("STOP"))
-                 {
-                   machineController->emergencyStop();
-                 }
-                 break;
- 
-               case GCodeParseResult::QUEUE_FULL:
-                 if (immediateCmd.startsWith("M112") || immediateCmd.startsWith("STOP"))
-                 {
-                   machineController->emergencyStop();
-                 }
-                 else
-                 {
-                   commandQueue->push(immediateCmd, IMMEDIATE);
-                 }
-                 break;
- 
-               case GCodeParseResult::SUCCESS:
-                 // Command successfully processed
-                 break;
-             }
+         // Only parse new GCode if motion control has space
+         if (gCodeParser && lineBuffer && motionControl && motionControl->hasSpace()) {
+           
+           // If we're not retrying a command, get the next one
+           if (!retryingCommand && currentCommand.isEmpty() && !lineBuffer->isEmpty()) {
+             currentCommand = lineBuffer->getLine();
            }
-           // Process regular commands
-           else
-           {
-             if(commandQueue->isEmpty())
-               continue;
-             String command = commandQueue->pop();
- 
-             // Parse as G-code
-             GCodeParseResult parseResult = gCodeParser->parse(command);
+           
+           // Process the command if we have one
+           if (currentCommand.length() > 0) {
+             // Process the line with the GCode parser
+             GCodeParseResult parseResult = gCodeParser->parse(currentCommand);
+             
              switch (parseResult)
              {
                case GCodeParseResult::PARSE_ERROR:
-                 Debug::error("MotionTask", "Failed to execute command: " + command);
+                 Debug::error("MotionTask", "Failed to execute command: " + currentCommand);
+                 // Error is already reported by the GCode parser
+                 // Clear the command since it failed
+                 currentCommand = "";
+                 retryingCommand = false;
                  break;
- 
+               
                case GCodeParseResult::QUEUE_FULL:
-                 commandQueue->push(command, IMMEDIATE);
+                 // Hold onto the command to retry later
+                 retryingCommand = true;
+                 // Wait for more space before retrying
+                 Debug::verbose("MotionTask", "Queue full, waiting to retry: " + currentCommand);
                  break;
- 
+               
                case GCodeParseResult::SUCCESS:
                  // Command successfully processed
+                 currentCommand = "";
+                 retryingCommand = false;
                  break;
              }
            }
          }
        }
  
-       // Update motor states - this should be called frequently
+       // Step 3: Update motor states - this should be called frequently
        motorManager.update();
  
        // Only add a delay if nothing important is happening
-       if (!scheduler->hasMove() && !motorManager.isAnyMotorMoving()) {
+       if ((!planner || planner->isEmpty()) && 
+           (!segmentGenerator || segmentGenerator->isEmpty()) && 
+           !motorManager.isAnyMotorMoving() &&
+           !retryingCommand) {
          vTaskDelay(1); // Only delay when idle
        }
      }
      catch (const std::exception &e)
      {
        Debug::error("MotionTask", "Exception caught: " + String(e.what()));
-       // Error handling code...
+       
+       // Emergency stop on error
+       if (machineController) {
+         machineController->emergencyStop();
+       }
      }
      catch (...)
      {
        Debug::error("MotionTask", "Unknown exception caught");
-       // Error handling code...
+       
+       // Emergency stop on error
+       if (machineController) {
+         machineController->emergencyStop();
+       }
      }
    }
  }
@@ -221,7 +210,7 @@
    Debug::setLevel(DEBUG_LEVEL);
  
    Serial.println("CNC Controller starting...");
-   Debug::info("Main", "CNC Controller starting up");
+   Debug::info("Main", "CNC Controller starting up with GRBL-inspired pipeline");
  
    // Initialize components in sequence with error checks
  
@@ -267,16 +256,16 @@
      Serial.println("Failed to initialize motors! Using safer defaults.");
    }
  
-   // 3. Initialize CommandQueue
-   Debug::info("Main", "Creating CommandQueue");
-   commandQueue = new CommandQueue(COMMAND_QUEUE_SIZE);
-   if (!commandQueue)
+   // 3. Initialize LineBuffer (receives incoming GCode lines)
+   Debug::info("Main", "Creating LineBuffer");
+   lineBuffer = new LineBuffer();
+   if (!lineBuffer)
    {
-     Debug::error("Main", "Failed to create CommandQueue");
-     Serial.println("Failed to create command queue!");
+     Debug::error("Main", "Failed to create LineBuffer");
+     Serial.println("Failed to create line buffer!");
    }
  
-   // 4. Initialize MachineController
+   // 4. Initialize MachineController (basic machine operations)
    Debug::info("Main", "Creating MachineController");
    machineController = new MachineController(&motorManager, &configManager);
    if (machineController)
@@ -289,45 +278,65 @@
      Serial.println("Failed to create machine controller!");
    }
  
-   // 5. Initialize segmented motion planner
-   Debug::info("Main", "Creating MotionPlanner");
-   scheduler = new Scheduler(machineController, &motorManager, &configManager);
-   if (scheduler)
+   // 5. Initialize SegmentGenerator (generates constant-velocity segments)
+   Debug::info("Main", "Creating SegmentGenerator");
+   segmentGenerator = new SegmentGenerator(machineController, &motorManager);
+   if (segmentGenerator)
    {
-     scheduler->initialize();
-     if (machineController)
-     {
-       machineController->setMotionPlanner(scheduler);
-       Debug::info("Main", "Segmented motion planner connected to machine controller");
+     segmentGenerator->initialize();
+     Debug::info("Main", "SegmentGenerator initialized");
+   }
+   else
+   {
+     Debug::error("Main", "Failed to create segment generator");
+     Serial.println("Failed to create segment generator!");
+   }
+ 
+   // 6. Initialize Planner (plans movement paths)
+   Debug::info("Main", "Creating Planner");
+   planner = new Planner(segmentGenerator);
+   if (planner)
+   {
+     planner->initialize();
+     Debug::info("Main", "Planner initialized");
+     
+     // Connect segment generator to planner
+     if (segmentGenerator) {
+       segmentGenerator->setPlanner(planner);
      }
    }
    else
    {
-     Debug::error("Main", "Failed to create segmented motion planner");
-     Serial.println("Failed to create segmented motion planner!");
+     Debug::error("Main", "Failed to create motion planner");
+     Serial.println("Failed to create motion planner!");
    }
  
-   // 6. Initialize GCodeParser
+   // 7. Initialize MotionControl (handles GCode-to-movement transformation)
+   Debug::info("Main", "Creating MotionControl");
+   motionControl = new MotionControl(machineController, planner);
+   if (motionControl)
+   {
+     motionControl->initialize();
+     Debug::info("Main", "MotionControl initialized");
+   }
+   else
+   {
+     Debug::error("Main", "Failed to create motion control");
+     Serial.println("Failed to create motion control!");
+   }
+ 
+   // 8. Initialize GCodeParser (parses GCode into machine commands)
    Debug::info("Main", "Creating GCodeParser");
-   gCodeParser = new GCodeParser(machineController);
+   gCodeParser = new GCodeParser(motionControl);
    if (!gCodeParser)
    {
      Debug::error("Main", "Failed to create GCodeParser");
      Serial.println("Failed to create G-code parser!");
    }
  
-   // 7. Initialize CommandProcessor
-   Debug::info("Main", "Creating CommandProcessor");
-   commandProcessor = new CommandProcessor(machineController, &configManager);
-   if (!commandProcessor)
-   {
-     Debug::error("Main", "Failed to create CommandProcessor");
-     Serial.println("Failed to create command processor!");
-   }
- 
-   // 8. Initialize GRBL CommunicationManager with telemetry
-   Debug::info("Main", "Creating GRBLCommunicationManager");
-   communicationManager = new CommunicationManager(commandQueue, commandProcessor);
+   // 9. Initialize CommunicationManager (handles serial communication)
+   Debug::info("Main", "Creating CommunicationManager");
+   communicationManager = new CommunicationManager(lineBuffer, machineController);
    if (communicationManager)
    {
      communicationManager->initialize(115200);
@@ -348,8 +357,8 @@
    }
    else
    {
-     Debug::error("Main", "Failed to create GRBLCommunicationManager");
-     Serial.println("Failed to create GRBL communication manager!");
+     Debug::error("Main", "Failed to create CommunicationManager");
+     Serial.println("Failed to create communication manager!");
    }
  
    // Create FreeRTOS tasks
@@ -390,8 +399,9 @@
      Debug::error("Main", "Failed to create motion task");
    }
  
-   Debug::info("Main", "System initialization complete");
-   Serial.println("Grbl system ready. Send G-code commands to begin.");
+   Debug::info("Main", "Pipeline initialization complete:");
+   Debug::info("Main", "LineBuffer → GCodeParser → MotionControl → Planner → SegmentGenerator → Motors");
+   Serial.println("System ready. Send G-code commands to begin.");
  
    // Print initial diagnostics
    Debug::printDiagnostics();

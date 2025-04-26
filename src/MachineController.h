@@ -1,6 +1,6 @@
 /**
  * @file MachineController.h
- * @brief Machine controller with segmented motion planner integration
+ * @brief Simplified machine controller for the pipeline architecture
  */
 
  #ifndef MACHINE_CONTROLLER_H
@@ -9,12 +9,15 @@
  #include <Arduino.h>
  #include <vector>
  #include "MotorManager.h"
- class Scheduler;
- #include "Kinematics.h"
+ #include "ConfigManager.h"
  #include "CommonTypes.h"
  
  /**
-  * @brief Controller class for the CNC machine with segmented motion planning
+  * @brief Controller class for the CNC machine
+  * 
+  * Handles machine state, position tracking, and basic machine operations.
+  * In the pipeline architecture, this serves as the interface between the
+  * higher-level components and the physical machine.
   */
  class MachineController
  {
@@ -33,12 +36,6 @@
    bool initialize();
  
    /**
-    * @brief Set the segmented motion planner
-    * @param motionPlanner Segmented motion planner
-    */
-   void setMotionPlanner(Scheduler *motionPlanner);
- 
-   /**
     * @brief Home all axes
     * @return True if successful, false otherwise
     */
@@ -52,33 +49,7 @@
    bool homeAxis(const String &axisName);
  
    /**
-    * @brief Move to a position in machine coordinates
-    * @param positions Array of positions for each axis
-    * @param feedrate Feedrate in mm/min
-    * @param movementType Movement type (RAPID, LINEAR, etc.)
-    * @return True if successful, false otherwise
-    */
-   bool moveTo(const std::vector<float> &positions, float feedrate, MovementType movementType);
- 
-   /**
-    * @brief Move to a position in machine coordinates
-    * @param x X position
-    * @param y Y position
-    * @param z Z position
-    * @param feedrate Feedrate in mm/min
-    * @param movementType Movement type (RAPID, LINEAR, etc.)
-    * @return True if successful, false otherwise
-    */
-   bool moveTo(float x, float y, float z, float feedrate, MovementType movementType);
- 
-   /**
-    * @brief Get motion planner
-    * @return Pointer to the motion planner
-    */
-   Scheduler *getMotionPlanner() { return motionPlanner; }
- 
-   /**
-    * @brief Get the current position in world coordinates
+    * @brief Get the current position in world coordinates (machine coordinates)
     * @return Vector of current world positions
     */
    std::vector<float> getCurrentWorldPosition() const;
@@ -99,11 +70,54 @@
    }
  
    /**
-    * @brief Get the current position of a specific axis
-    * @param axisName Axis name
-    * @return Current position in user units
+    * @brief Set the work coordinate system offset
+    * @param offsets Array of offsets for each axis
     */
-   float getCurrentAxisPosition(const String &axisName) const;
+   void setWorkOffset(const std::vector<float> &offsets);
+ 
+   /**
+    * @brief Convert work coordinates to machine coordinates
+    * @param workPos Work position
+    * @return Machine positions
+    */
+   std::vector<float> workToMachinePositions(const std::vector<float> &workPos) const;
+ 
+   /**
+    * @brief Convert machine coordinates to work coordinates
+    * @param machinePos Machine position
+    * @return Work positions
+    */
+   std::vector<float> machineToWorkPositions(const std::vector<float> &machinePos) const;
+ 
+   /**
+    * @brief Get the current axis velocity vector
+    * @return Vector of velocities for each axis (mm/min)
+    */
+   std::vector<float> getCurrentVelocityVector() const;
+ 
+   /**
+    * @brief Get the current velocity magnitude
+    * @return Current velocity in mm/min
+    */
+   float getCurrentVelocity() const;
+ 
+   /**
+    * @brief Get the desired velocity vector
+    * @return Vector of desired velocities (mm/min)
+    */
+   std::vector<float> getCurrentDesiredVelocityVector() const;
+ 
+   /**
+    * @brief Set the current desired velocity vector
+    * @param velocities Vector of velocities (mm/min)
+    */
+   void setCurrentDesiredVelocityVector(std::vector<float> velocities);
+ 
+   /**
+    * @brief Get the current feedrate
+    * @return Current feedrate in mm/min
+    */
+   float getCurrentFeedrate() const;
  
    /**
     * @brief Check if the machine is currently moving
@@ -117,10 +131,14 @@
    void emergencyStop();
  
    /**
-    * @brief Set the work coordinate system offset
-    * @param offsets Array of offsets for each axis
+    * @brief Pause current movement (for GRBL feedhold support)
     */
-   void setWorkOffset(const std::vector<float> &offsets);
+   void pauseMovement();
+ 
+   /**
+    * @brief Resume movement after pause (for GRBL resume support)
+    */
+   void resumeMovement();
  
    /**
     * @brief Get the MotorManager
@@ -129,6 +147,15 @@
    MotorManager *getMotorManager() const
    {
      return motorManager;
+   }
+ 
+   /**
+    * @brief Get pointer to the ConfigManager
+    * @return Pointer to the ConfigManager instance
+    */
+   ConfigManager *getConfigManager() const
+   {
+     return configManager;
    }
  
    /**
@@ -149,118 +176,30 @@
      absoluteMode = absolute;
    }
  
-   /**
-    * @brief Get pointer to the ConfigManager
-    * @return Pointer to the ConfigManager instance
-    */
-   ConfigManager *getConfigManager()
-   {
-     return configManager;
-   }
- 
-   /**
-    * @brief Get the current end effector velocity vector
-    * @return Vector of velocities (mm/min) for each axis
-    */
-   std::vector<float> getCurrentVelocityVector() const;
- 
-   /**
-    * @brief Get the current end effector scalar velocity
-    * @return Current velocity in mm/min
-    */
-   float getCurrentVelocity() const;
- 
-   /**
-    * @brief Get the current end effector desired velocity vector
-    * @return Vector of velocities (mm/min) for each axis
-    */
-   std::vector<float> getCurrentDesiredVelocityVector() const;
- 
-   /**
-    * @brief Get the current end effector desired scalar velocity
-    * @return Current velocity in mm/min
-    */
-   float getCurrentDesiredVelocity() const;
- 
-   /**
-    * @brief Get the current feedrate
-    * @return Current feedrate in mm/min
-    */
-   float getCurrentFeedrate() const;
- 
-   void setCurrentDesiredVelocityVector(std::vector<float>);
- 
-   /**
-    * @brief Move to a position in machine coordinates (G53)
-    * @param positions Array of positions for each axis in machine coordinates
-    * @param feedrate Feedrate in mm/min
-    * @param movementType Movement type (RAPID, LINEAR, etc.)
-    * @return True if successful, false otherwise
-    */
-   bool moveToMachineCoordinates(const std::vector<float> &positions, float feedrate, MovementType movementType);
- 
-   /**
-    * @brief Move to a position in machine coordinates (G53)
-    * @param x X position in machine coordinates
-    * @param y Y position in machine coordinates
-    * @param z Z position in machine coordinates
-    * @param feedrate Feedrate in mm/min
-    * @param movementType Movement type (RAPID, LINEAR, etc.)
-    * @return True if successful, false otherwise
-    */
-   bool moveToMachineCoordinates(float x, float y, float z, float feedrate, MovementType movementType);
- 
-   /**
-    * @brief Pause current movement (for GRBL feedhold support)
-    */
-   void pauseMovement();
- 
-   /**
-    * @brief Resume movement after pause (for GRBL resume support)
-    */
-   void resumeMovement();
- 
  private:
-   MotorManager *motorManager;    ///< Motor manager
-   Kinematics *kinematics;        ///< Kinematics calculator (for transform)
-   std::vector<float> workOffset; ///< Work coordinate system offset
-   float currentFeedrate;         ///< Current feedrate in mm/min
-   bool absoluteMode;             ///< True if in absolute mode, false if in relative mode
-   Scheduler *motionPlanner;      ///< Segmented motion planner
-   std::vector<float> desiredVelocityVector;
+   MotorManager *motorManager;     ///< Motor manager
+   ConfigManager *configManager;   ///< Configuration manager
+   std::vector<float> workOffset;  ///< Work coordinate system offset
+   std::vector<float> desiredVelocityVector;  ///< Desired axis velocities
+   float currentFeedrate;          ///< Current feedrate in mm/min
+   bool absoluteMode;              ///< True if in absolute mode, false if in relative mode
  
    /**
-    * @brief Convert machine coordinates to motor positions
-    * @param machinePos Machine position
-    * @return Motor positions
-    */
-   std::vector<float> machineToMotorPositions(const std::vector<float> &machinePos);
- 
-   /**
-    * @brief Convert work coordinates to machine coordinates
-    * @param workPos Work position
-    * @return Machine positions
-    */
-   std::vector<float> workToMachinePositions(const std::vector<float> &workPos);
- 
-   /**
-    * @brief Validate and optionally clamp position to machine limits
-    * @param motorName Motor name
-    * @param position Proposed position
-    * @param clampToLimits If true, clamps the value to limits; if false, returns false when out of limits
-    * @param clampedPosition Output parameter for the clamped position (if clamping)
-    * @return True if within limits (or clamped successfully), false if out of limits (and not clamping)
-    */
-   bool validatePosition(const String &motorName, float position, bool clampToLimits, float &clampedPosition);
- 
-   /**
-    * @brief Apply machine limits to ensure positions are within bounds
+    * @brief Apply machine limits to positions
     * @param machinePos Machine positions
     * @return Constrained machine positions
     */
-   std::vector<float> applyMachineLimits(const std::vector<float> &machinePos);
+   std::vector<float> applyMachineLimits(const std::vector<float> &machinePos) const;
  
-   ConfigManager *configManager;
+   /**
+    * @brief Validate a position against machine limits
+    * @param motorName Motor name
+    * @param position Position to validate
+    * @param clampToLimits Whether to clamp to limits
+    * @param clampedPosition Output for clamped position
+    * @return True if valid, false otherwise
+    */
+   bool validatePosition(const String &motorName, float position, bool clampToLimits, float &clampedPosition);
  };
  
  #endif // MACHINE_CONTROLLER_H
