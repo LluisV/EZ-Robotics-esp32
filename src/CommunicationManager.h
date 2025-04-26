@@ -1,6 +1,6 @@
 /**
  * @file GRBLCommunicationManager.h
- * @brief Communication manager with GRBL protocol support
+ * @brief Communication manager with GRBL protocol support and JSON telemetry
  */
 
  #ifndef GRBL_COMMUNICATION_MANAGER_H
@@ -60,6 +60,39 @@
       */
      void setStatusReportInterval(unsigned long intervalMs);
  
+     /**
+      * @brief Send machine position telemetry in JSON format
+      * @param force Force sending telemetry even if no change or machine not moving
+      */
+     void sendPositionTelemetry(bool force = false);
+ 
+     /**
+      * @brief Get telemetry frequency in Hz
+      * @return Current telemetry frequency
+      */
+     int getTelemetryFrequency() const
+     {
+         return telemetryFrequency;
+     }
+ 
+     /**
+      * @brief Set telemetry frequency in Hz
+      * @param frequency Frequency in Hz
+      */
+     void setTelemetryFrequency(int frequency)
+     {
+         telemetryFrequency = frequency > 0 ? frequency : 1;
+     }
+ 
+     /**
+      * @brief Enable or disable telemetry
+      * @param enabled True to enable, false to disable
+      */
+     void setTelemetryEnabled(bool enabled)
+     {
+         telemetryEnabled = enabled;
+     }
+ 
  private:
      CommandQueue *commandQueue;         ///< Reference to the command queue
      CommandProcessor *commandProcessor; ///< Reference to the command processor
@@ -78,6 +111,13 @@
      int lineNumber;                         ///< Current line number (if supported)
      bool awaitingAck;                       ///< Waiting to send acknowledgment
  
+     // Telemetry settings
+     bool telemetryEnabled;                  ///< Telemetry enabled flag
+     int telemetryFrequency;                 ///< Telemetry frequency in Hz
+     unsigned long lastTelemetryTime;        ///< Last telemetry time
+     std::vector<float> lastReportedPosition; ///< Last reported position
+     String telemetryMsgBuffer;              ///< Buffer for telemetry messages
+ 
      CPUMonitor *cpuMonitor;                 ///< CPU usage monitor
  
      /**
@@ -85,12 +125,6 @@
       * @param line Line to process
       */
      void processLine(const String &line);
- 
-     /**
-      * @brief Process a realtime command character
-      * @param c The realtime command character
-      */
-     void processRealtimeCommand(char c);
  
      /**
       * @brief Reset the line buffer
@@ -104,25 +138,6 @@
       */
      void sendAcknowledgment(bool success, int errorCode = 0);
  
-     /**
-      * @brief Compose a GRBL-compatible status report
-      * @return Formatted status report string
-      */
-     String composeStatusReport();
- 
-     /**
-      * @brief Compose a GRBL-compatible alarm message
-      * @param alarmCode Alarm code
-      * @return Formatted alarm message
-      */
-     String composeAlarmMessage(int alarmCode);
- 
-     /**
-      * @brief Handle GRBL system commands ($ commands)
-      * @param line Command line
-      * @return True if command was handled
-      */
-     bool handleSystemCommand(const String &line);
  };
  
  #endif // GRBL_COMMUNICATION_MANAGER_H

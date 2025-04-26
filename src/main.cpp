@@ -1,6 +1,6 @@
 /**
  * @file main.cpp
- * @brief Main application with GRBL protocol support - simplified version
+ * @brief Main application with GRBL protocol support and JSON telemetry
  */
 
  #include <Arduino.h>
@@ -11,7 +11,7 @@
  #include "GCodeParser.h"
  #include "CommandQueue.h"
  #include "CommandProcessor.h"
- #include "CommunicationManager.h"
+ #include "CommunicationManager.h" // GRBL communication manager with telemetry
  #include "Scheduler.h"
  
  // Debug configuration
@@ -325,12 +325,24 @@
      Serial.println("Failed to create command processor!");
    }
  
-   // 8. Initialize GRBL CommunicationManager
+   // 8. Initialize GRBL CommunicationManager with telemetry
    Debug::info("Main", "Creating GRBLCommunicationManager");
    communicationManager = new GRBLCommunicationManager(commandQueue, commandProcessor);
    if (communicationManager)
    {
      communicationManager->initialize(115200);
+     
+     // Configure telemetry from machine config if available
+     const MachineConfig &machineConfig = configManager.getMachineConfig();
+     if (machineConfig.telemetry.enabled) {
+       communicationManager->setTelemetryEnabled(true);
+       communicationManager->setTelemetryFrequency(machineConfig.telemetry.updatePositionFrequency);
+       Debug::info("Main", "Telemetry enabled at " + String(machineConfig.telemetry.updatePositionFrequency) + "Hz");
+     } else {
+       communicationManager->setTelemetryEnabled(false);
+       Debug::info("Main", "Telemetry disabled by configuration");
+     }
+     
      // Set status report interval to 100ms (10Hz) for GCode senders
      communicationManager->setStatusReportInterval(100);
    }
