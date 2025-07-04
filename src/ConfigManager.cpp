@@ -1,6 +1,6 @@
 /**
  * @file ConfigManager.cpp
- * @brief Implementation of the ConfigManager class
+ * @brief Implementation of the ConfigManager class with kinematics support
  */
 
 #include <vector>
@@ -31,7 +31,7 @@ bool ConfigManager::init()
   // First try formatting SPIFFS explicitly
   if (!SPIFFS.begin(false))
   {
-    //Debug::warning("ConfigManager", "SPIFFS mount failed, trying to format...");
+    Debug::warning("ConfigManager", "SPIFFS mount failed, trying to format...");
 
     if (SPIFFS.format())
     {
@@ -71,7 +71,7 @@ bool ConfigManager::loadConfig()
   // Check if config file exists
   if (!SPIFFS.exists(CONFIG_FILE))
   {
-    //Debug::warning("ConfigManager", "Config file not found");
+    Debug::warning("ConfigManager", "Config file not found");
     return false;
   }
 
@@ -120,7 +120,7 @@ bool ConfigManager::loadConfig()
     }
     else
     {
-      //Debug::warning("ConfigManager", "Failed to parse motor configuration for " + motorJson["name"].as<String>());
+      Debug::warning("ConfigManager", "Failed to parse motor configuration for " + motorJson["name"].as<String>());
       // Continue parsing other motors
     }
   }
@@ -148,8 +148,52 @@ bool ConfigManager::saveConfig()
   machineJson["machineName"] = machineConfig.machineName;
   machineJson["defaultFeedrate"] = machineConfig.defaultFeedrate;
   machineJson["maxFeedrate"] = machineConfig.maxFeedrate;
+  machineJson["maxAcceleration"] = machineConfig.maxAcceleration;
   machineJson["junctionDeviation"] = machineConfig.junctionDeviation;
   machineJson["arcTolerance"] = machineConfig.arcTolerance;
+  
+  // Add stepping parameters
+  machineJson["stepPulseUsecs"] = machineConfig.stepPulseUsecs;
+  machineJson["directionDelayUsecs"] = machineConfig.directionDelayUsecs;
+  machineJson["idleTimeoutMsecs"] = machineConfig.idleTimeoutMsecs;
+  machineJson["steppingFrequency"] = machineConfig.steppingFrequency;
+
+  // Add telemetry configuration
+  JsonObject telemetryJson = machineJson["telemetry"].to<JsonObject>();
+  telemetryJson["enabled"] = machineConfig.telemetry.enabled;
+  telemetryJson["updateFrequency"] = machineConfig.telemetry.updatePositionFrequency;
+  
+  // Add kinematics configuration
+  JsonObject kinematicsJson = machineJson["kinematics"].to<JsonObject>();
+  kinematicsJson["useKinematics"] = machineConfig.kinematics.useKinematics;
+  
+  // Convert robot type to string
+  String robotTypeStr = "GENERIC";
+  switch (machineConfig.kinematics.robotType) {
+    case RobotType::SCARA:
+      robotTypeStr = "SCARA";
+      break;
+    case RobotType::CARTESIAN:
+      robotTypeStr = "CARTESIAN";
+      break;
+    case RobotType::ARTICULATED_2R:
+      robotTypeStr = "ARTICULATED_2R";
+      break;
+    default:
+      robotTypeStr = "GENERIC";
+      break;
+  }
+  kinematicsJson["robotType"] = robotTypeStr;
+  
+  // Save DH parameters
+  JsonArray dhParamsArray = kinematicsJson["dhParams"].to<JsonArray>();
+  for (const auto& dhParam : machineConfig.kinematics.dhParams) {
+    JsonObject paramJson = dhParamsArray.add<JsonObject>();
+    paramJson["theta"] = dhParam.theta;
+    paramJson["d"] = dhParam.d;
+    paramJson["a"] = dhParam.a;
+    paramJson["alpha"] = dhParam.alpha;
+  }
 
   // Add motor configurations
   JsonArray motorsArray = doc["motors"].to<JsonArray>();
@@ -174,7 +218,8 @@ bool ConfigManager::saveConfig()
     motorJson["maxPosition"] = motor.maxPosition;
     motorJson["endstopPosition"] = motor.endstopPosition;
     motorJson["homePosition"] = motor.homePosition;
-    motorJson["invertPosition"] = motor.invertPosition;
+    motorJson["invertStep"] = motor.invertStep;
+    motorJson["invertDirection"] = motor.invertDirection;
   }
 
   // Open file for writing
@@ -208,12 +253,23 @@ void ConfigManager::useDefaultConfig()
   machineConfig.machineName = "Default CNC";
   machineConfig.defaultFeedrate = 1000.0; //  mm/min
   machineConfig.maxFeedrate = 2000.0;     //  mm/min
-  machineConfig.maxAcceleration = 30.0;     // mm/s^2
-  machineConfig.junctionDeviation = 0.05; // 0.01 mm
+  machineConfig.maxAcceleration = 30.0;   // mm/s^2
+  machineConfig.junctionDeviation = 0.05; // 0.05 mm
   machineConfig.arcTolerance = 0.002;     // 0.002 mm
+  
+  // Default stepping parameters
+  machineConfig.stepPulseUsecs = 4;         // 4 μs step pulse
+  machineConfig.directionDelayUsecs = 0;    // 0 μs direction delay
+  machineConfig.idleTimeoutMsecs = 255;     // 255 ms idle timeout
+  machineConfig.steppingFrequency = 20000000; // 20 MHz stepping timer frequency
 
   machineConfig.telemetry.enabled = true;               // Enable telemetry by default
-  machineConfig.telemetry.updatePositionFrequency = 20; // 10 Hz update rate
+  machineConfig.telemetry.updatePositionFrequency = 20; // 20 Hz update rate
+  
+  // Default kinematics configuration (Cartesian, no transformation)
+  machineConfig.kinematics.useKinematics = false;
+  machineConfig.kinematics.robotType = RobotType::CARTESIAN;
+  machineConfig.kinematics.dhParams.clear();
 
   // Setup default X axis
   MotorConfig xConfig;
@@ -235,7 +291,8 @@ void ConfigManager::useDefaultConfig()
   xConfig.maxPosition = 240.0;
   xConfig.endstopPosition = 0.0;
   xConfig.homePosition = 0.0;
-  xConfig.invertPosition = false;
+  xConfig.invertDirection = false;
+  xConfig.invertStep = false;
   motors.push_back(xConfig);
 
   // Setup default Y axis
@@ -258,7 +315,8 @@ void ConfigManager::useDefaultConfig()
   yConfig.maxPosition = 350.0;
   yConfig.endstopPosition = 0.0;
   yConfig.homePosition = 0.0;
-  yConfig.invertPosition = false;
+  yConfig.invertDirection = false;
+  yConfig.invertStep = false;
   motors.push_back(yConfig);
 
   // Setup default Z axis
@@ -281,7 +339,8 @@ void ConfigManager::useDefaultConfig()
   zConfig.maxPosition = 125.0;
   zConfig.endstopPosition = 125.0;
   zConfig.homePosition = 125.0;
-  zConfig.invertPosition = true;
+  zConfig.invertDirection = true;
+  zConfig.invertStep = false;
   motors.push_back(zConfig);
 
   Debug::info("ConfigManager", "Using default configuration with 3 axes");
@@ -379,7 +438,8 @@ bool ConfigManager::parseMotorConfig(const JsonObject &json, MotorConfig &config
   config.maxPosition = json["maxPosition"].is<float>() ? json["maxPosition"].as<float>() : 200.0f;
   config.endstopPosition = json["endstopPosition"].is<float>() ? json["endstopPosition"].as<float>() : 0.0f;
   config.homePosition = json["homePosition"].is<float>() ? json["homePosition"].as<float>() : 0.0f;
-  config.invertPosition = json["invertPosition"].is<bool>() ? json["invertPosition"].as<bool>() : false;
+  config.invertStep = json["invertStep"].is<bool>() ? json["invertStep"].as<bool>() : false;
+  config.invertDirection = json["invertDirection"].is<bool>() ? json["invertDirection"].as<bool>() : false;
 
   return true;
 }
@@ -392,26 +452,85 @@ bool ConfigManager::parseMachineConfig(const JsonObject &json)
     machineConfig.machineName = "Default CNC";
     machineConfig.defaultFeedrate = 1000.0;
     machineConfig.maxFeedrate = 5000.0;
-    machineConfig.junctionDeviation = 0.01;
+    machineConfig.maxAcceleration = 30.0;
+    machineConfig.junctionDeviation = 0.05;
     machineConfig.arcTolerance = 0.002;
-
+    
+    // Default stepping parameters
+    machineConfig.stepPulseUsecs = 4;
+    machineConfig.directionDelayUsecs = 0;
+    machineConfig.idleTimeoutMsecs = 255;
+    machineConfig.steppingFrequency = 20000000; // 20 MHz
+    
     // Default telemetry configuration
     machineConfig.telemetry.enabled = true;
-    machineConfig.telemetry.updatePositionFrequency = 10;
+    machineConfig.telemetry.updatePositionFrequency = 20;
+    
+    // Default kinematics configuration
+    machineConfig.kinematics.useKinematics = false;
+    machineConfig.kinematics.robotType = RobotType::GENERIC;
 
     return true;
   }
 
+  // Parse machine configuration
   machineConfig.machineName = json["machineName"].is<String>() ? json["machineName"].as<String>() : "Default CNC";
   machineConfig.defaultFeedrate = json["defaultFeedrate"].is<float>() ? json["defaultFeedrate"].as<float>() : 1000.0f;
   machineConfig.maxFeedrate = json["maxFeedrate"].is<float>() ? json["maxFeedrate"].as<float>() : 2000.0f;
-  machineConfig.junctionDeviation = json["junctionDeviation"].is<float>() ? json["junctionDeviation"].as<float>() : 0.01f;
+  machineConfig.maxAcceleration = json["maxAcceleration"].is<float>() ? json["maxAcceleration"].as<float>() : 30.0f;
+  machineConfig.junctionDeviation = json["junctionDeviation"].is<float>() ? json["junctionDeviation"].as<float>() : 0.05f;
   machineConfig.arcTolerance = json["arcTolerance"].is<float>() ? json["arcTolerance"].as<float>() : 0.002f;
+  
+  // Parse stepping parameters
+  machineConfig.stepPulseUsecs = json["stepPulseUsecs"].is<uint32_t>() ? json["stepPulseUsecs"].as<uint32_t>() : 4;
+  machineConfig.directionDelayUsecs = json["directionDelayUsecs"].is<uint32_t>() ? json["directionDelayUsecs"].as<uint32_t>() : 0;
+  machineConfig.idleTimeoutMsecs = json["idleTimeoutMsecs"].is<uint32_t>() ? json["idleTimeoutMsecs"].as<uint32_t>() : 255;
+  machineConfig.steppingFrequency = json["steppingFrequency"].is<uint32_t>() ? json["steppingFrequency"].as<uint32_t>() : 20000000;
 
   // Parse telemetry configuration
   JsonObject telemetryJson = json["telemetry"].as<JsonObject>();
   machineConfig.telemetry.enabled = telemetryJson["enabled"].is<bool>() ? telemetryJson["enabled"].as<bool>() : true;
-  machineConfig.telemetry.updatePositionFrequency = telemetryJson["updateFrequency"].is<int>() ? telemetryJson["updateFrequency"].as<int>() : 10;
+  machineConfig.telemetry.updatePositionFrequency = telemetryJson["updateFrequency"].is<int>() ? telemetryJson["updateFrequency"].as<int>() : 20;
+  
+  // Parse kinematics configuration
+  JsonObject kinematicsJson = json["kinematics"].as<JsonObject>();
+  if (!kinematicsJson.isNull()) {
+    machineConfig.kinematics.useKinematics = kinematicsJson["useKinematics"].as<bool>();
+    
+    // Parse robot type
+    String robotTypeStr = kinematicsJson["robotType"].as<String>();
+    if (robotTypeStr == "SCARA") {
+      machineConfig.kinematics.robotType = RobotType::SCARA;
+    } else if (robotTypeStr == "CARTESIAN") {
+      machineConfig.kinematics.robotType = RobotType::CARTESIAN;
+    } else if (robotTypeStr == "ARTICULATED_2R") {
+      machineConfig.kinematics.robotType = RobotType::ARTICULATED_2R;
+    } else {
+      machineConfig.kinematics.robotType = RobotType::GENERIC;
+    }
+    
+    // Parse DH parameters
+    JsonArray dhParamsArray = kinematicsJson["dhParams"].as<JsonArray>();
+    if (!dhParamsArray.isNull()) {
+      machineConfig.kinematics.dhParams.clear();
+      
+      for (JsonObject dhParam : dhParamsArray) {
+        DHParameters params;
+        params.theta = dhParam["theta"].as<double>();
+        params.d = dhParam["d"].as<double>();
+        params.a = dhParam["a"].as<double>();
+        params.alpha = dhParam["alpha"].as<double>();
+        
+        machineConfig.kinematics.dhParams.push_back(params);
+      }
+    }
+    
+    Debug::info("ConfigManager", "Loaded kinematics configuration for " + robotTypeStr);
+  } else {
+    // Default to no kinematics
+    machineConfig.kinematics.useKinematics = false;
+    machineConfig.kinematics.robotType = RobotType::GENERIC;
+  }
 
   return true;
 }

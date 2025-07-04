@@ -1,88 +1,110 @@
 {
-    "machine": {
-      "machineName": "3-Axis CNC",
-      "defaultFeedrate": 1000.0,
-      "maxFeedrate": 2000.0,
-      "junctionDeviation": 0.05,
-      "arcTolerance": 0.002,
-      "maxAcceleration": 20,
-      "telemetry": {
-        "enabled": true,
-        "updatePositionFrequency": 10
-      }
-    },
+  "machine": {
+    "machineName": "SCARA Robot",
+    "defaultFeedrate": 1000.0,
+    "maxFeedrate": 2000.0,
+    "maxAcceleration": 30.0,
+    "junctionDeviation": 0.05,
+    "arcTolerance": 0.002,
+    "stepPulseUsecs": 4,
+    "directionDelayUsecs": 0,
+    "idleTimeoutMsecs": 255,
+    "steppingFrequency": 20000000,
     "telemetry": {
       "enabled": true,
-      "updateFrequency": 10,
-      "positionReporting": {
-        "updateInterval": 100,
-        "reportMovingOnly": false,
-        "units": "mm"
-      }
+      "updatePositionFrequency": 20
     },
-    "motors": [
-      {
-        "name": "X",
-        "stepPin": 13,
-        "dirPin": 12,
-        "endstopPin": 14,
-        "endstopInverted": false,
-        "stepsPerRev": 1600,
-        "reduction": 1.0,
-        "leadScrewPitch": 5.0,
-        "type": "LINEAR_AXIS",
-        "maxSpeed": 2000,
-        "homeSpeed": 1000,
-        "maxAcceleration": 8000,
-        "homingDirection": -1,
-        "backoffDistance": 5.0,
-        "minPosition": 0.0,
-        "maxPosition": 240.0,
-        "endstopPosition": 0.0,
-        "homePosition": 0.0,
-        "invertPosition": false
-      },
-      {
-        "name": "Y",
-        "stepPin": 33,
-        "dirPin": 32,
-        "endstopPin": 15,
-        "endstopInverted": false,
-        "stepsPerRev": 1600,
-        "reduction": 1.0,
-        "leadScrewPitch": 5.0,
-        "type": "LINEAR_AXIS",
-        "maxSpeed": 2000,
-        "homeSpeed": 1000,
-        "maxAcceleration": 8000,
-        "homingDirection": -1,
-        "backoffDistance": 5.0,
-        "minPosition": 0.0,
-        "maxPosition": 350.0,
-        "endstopPosition": 0.0,
-        "homePosition": 0.0,
-        "invertPosition": false
-      },
-      {
-        "name": "Z",
-        "stepPin": 26,
-        "dirPin": 25,
-        "endstopPin": 4,
-        "endstopInverted": false,
-        "stepsPerRev": 1600,
-        "reduction": 1.0,
-        "leadScrewPitch": 5.0,
-        "type": "LINEAR_AXIS",
-        "maxSpeed": 2000,
-        "homeSpeed": 1000,
-        "maxAcceleration": 8000,
-        "homingDirection": -1,
-        "backoffDistance": 5.0,
-        "minPosition": 0.0,
-        "maxPosition": 125.0,
-        "endstopPosition": 125.0,
-        "homePosition": 125.0,
-        "invertPosition": true
-      }
-    ]
-  }
+    "kinematics": {
+      "useKinematics": true,
+      "robotType": "SCARA",
+      "dhParams": [
+        {
+          "theta": 0.0,
+          "d": 0.0,
+          "a": 0.0,
+          "alpha": 0.0
+        },
+        {
+          "theta": 0.0,
+          "d": 0.0,
+          "a": 200.0,
+          "alpha": 0.0
+        },
+        {
+          "theta": 0.0,
+          "d": 0.0,
+          "a": 200.0,
+          "alpha": 0.0
+        }
+      ]
+    }
+  },
+  "motors": [
+    {
+      "name": "Z",
+      "stepPin": 26,
+      "dirPin": 25,
+      "endstopPin": 4,
+      "endstopInverted": false,
+      "stepsPerRev": 1600,
+      "reduction": 1.0,
+      "leadScrewPitch": 5.0,
+      "type": "LINEAR_AXIS",
+      "maxSpeed": 2000,
+      "homeSpeed": 1000,
+      "maxAcceleration": 8000,
+      "homingDirection": -1,
+      "backoffDistance": 5.0,
+      "minPosition": 0.0,
+      "maxPosition": 200.0,
+      "endstopPosition": 200.0,
+      "homePosition": 200.0,
+      "invertDirection": false,
+      "invertStep": false
+    },
+    {
+      "name": "J1",
+      "stepPin": 13,
+      "dirPin": 12,
+      "endstopPin": 14,
+      "endstopInverted": false,
+      "stepsPerRev": 1600,
+      "reduction": 50.0,
+      "leadScrewPitch": 360.0,
+      "type": "ANGULAR_AXIS",
+      "maxSpeed": 2000,
+      "homeSpeed": 1000,
+      "maxAcceleration": 8000,
+      "homingDirection": -1,
+      "backoffDistance": 5.0,
+      "minPosition": -90.0,
+      "maxPosition": 90.0,
+      "endstopPosition": 0.0,
+      "homePosition": 0.0,
+      "invertDirection": false,
+      "invertStep": false
+    },
+    {
+      "name": "J2",
+      "stepPin": 33,
+      "dirPin": 32,
+      "endstopPin": 15,
+      "endstopInverted": false,
+      "stepsPerRev": 1600,
+      "reduction": 50.0,
+      "leadScrewPitch": 360.0,
+      "type": "ANGULAR_AXIS",
+      "maxSpeed": 2000,
+      "homeSpeed": 1000,
+      "maxAcceleration": 8000,
+      "homingDirection": -1,
+      "backoffDistance": 5.0,
+      "minPosition": -135.0,
+      "maxPosition": 135.0,
+      "endstopPosition": 0.0,
+      "homePosition": 0.0,
+      "invertDirection": false,
+      "invertStep": false
+    }
+  ]
+}

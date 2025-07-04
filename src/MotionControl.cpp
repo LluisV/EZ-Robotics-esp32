@@ -5,6 +5,7 @@
 
  #include "MotionControl.h"
  #include "Planner.h"
+ #include "Kinematics.h"
  #include <cmath>
  
  MotionControl::MotionControl(MachineController* machineController, Planner* planner)

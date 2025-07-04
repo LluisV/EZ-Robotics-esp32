@@ -98,14 +98,14 @@
      switch (c) {
          case '!': // Feed hold (pause)
              if (machineController) {
-                 machineController->pauseMovement();
+                 //machineController->pauseMovement();
                  Debug::info("CommunicationManager", "Feed hold triggered");
              }
              return true;
              
          case '~': // Cycle start/resume
              if (machineController) {
-                 machineController->resumeMovement();
+                 //machineController->resumeMovement();
                  Debug::info("CommunicationManager", "Resume triggered");
              }
              return true;

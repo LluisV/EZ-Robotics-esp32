@@ -1,6 +1,6 @@
 /**
  * @file ConfigManager.h
- * @brief Configuration manager for the CNC controller
+ * @brief Configuration manager for the CNC controller with kinematics support
  */
 
 #ifndef CONFIG_MANAGER_H
@@ -10,6 +10,8 @@
 #include <ArduinoJson.h>
 #include <SPIFFS.h>
 #include <vector>
+#include "RoboticsUtils.h"
+#include "DH.h"
 
 /**
  * @brief Axis type enumeration
@@ -43,7 +45,28 @@ struct MotorConfig
   float maxPosition;     ///< Maximum allowed position
   float endstopPosition; ///< Position value at endstop
   float homePosition;    ///< Position after homing
-  bool invertPosition;   ///< If true, motor moving in + direction decreases position
+  bool invertStep;       ///< Invert step pulse
+  bool invertDirection;  ///< Invert direction signal
+};
+
+/**
+ * @brief DH parameters for a single joint
+ */
+struct DHParameters {
+  double theta;    ///< Joint angle offset (for prismatic joints)
+  double d;        ///< Link offset (for revolute joints) 
+  double a;        ///< Link length
+  double alpha;    ///< Link twist
+};
+
+
+/**
+ * @brief Kinematics configuration
+ */
+struct KinematicsConfig {
+  bool useKinematics;              ///< Enable kinematics transformation
+  RobotType robotType;             ///< Robot type (CARTESIAN, SCARA, ARTICULATED_2R, etc.)
+  std::vector<DHParameters> dhParams; ///< DH parameters for each joint
 };
 
 /**
@@ -54,14 +77,23 @@ struct MachineConfig
   String machineName;      ///< Machine name
   float defaultFeedrate;   ///< Default feedrate in mm/min
   float maxFeedrate;       ///< Maximum feedrate in mm/min
-  float maxAcceleration;   ///< Acceleration in steps/second²
-  float junctionDeviation; ///< Junction deviation for path planning
+  float maxAcceleration;   ///< Acceleration in mm/sec²
+  float junctionDeviation; ///< Junction deviation for path planning in mm
   float arcTolerance;      ///< Arc tolerance in mm
+  
+  // Stepping parameters
+  uint32_t stepPulseUsecs;         ///< Step pulse duration in microseconds
+  uint32_t directionDelayUsecs;    ///< Direction signal setup time in microseconds
+  uint32_t idleTimeoutMsecs;       ///< Idle timeout before disabling steppers in milliseconds
+  uint32_t steppingFrequency;      ///< Stepping timer frequency in Hz
+  
   struct
   {
     bool enabled;                ///< Whether telemetry is enabled
     int updatePositionFrequency; ///< Telemetry update frequency in Hz
   } telemetry;
+  
+  KinematicsConfig kinematics;     ///< Kinematics configuration
 };
 
 /**
